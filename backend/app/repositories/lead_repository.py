@@ -1,0 +1,142 @@
+from datetime import datetime, timezone
+from app.models.lead import ContractorRecord, LeadInsight
+
+
+class LeadRepository:
+    def __init__(self, client):
+        self._client = client
+
+    async def upsert_contractor(self, contractor: ContractorRecord) -> dict:
+        """Upsert by gaf_contractor_id; falls back to insert for new records."""
+        row = {
+            "company_name": contractor.company_name,
+            "gaf_contractor_id": contractor.gaf_contractor_id,
+            "address": contractor.address,
+            "city": contractor.city,
+            "state": contractor.state,
+            "postal_code": contractor.postal_code,
+            "country_code": contractor.country_code,
+            "phone": contractor.phone,
+            "website": contractor.website,
+            "gaf_profile_url": contractor.gaf_profile_url,
+            "certifications": contractor.certifications,
+            "years_in_business": contractor.years_in_business,
+            "service_area": contractor.service_area,
+            "rating": float(contractor.rating) if contractor.rating else None,
+            "review_count": contractor.review_count,
+            "status": "scraped",
+        }
+        result = (
+            await self._client.table("leads")
+            .upsert(row, on_conflict="gaf_contractor_id")
+            .execute()
+        )
+        return result.data[0]
+
+    async def get_all_leads(self) -> list[dict]:
+        result = (
+            await self._client.table("leads")
+            .select("*")
+            .order("lead_score", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    async def get_lead_by_id(self, lead_id: str) -> dict | None:
+        result = (
+            await self._client.table("leads")
+            .select("*")
+            .eq("id", lead_id)
+            .single()
+            .execute()
+        )
+        return result.data
+
+    async def update_research(self, lead_id: str, summary: str, sources: list[str]) -> dict:
+        result = (
+            await self._client.table("leads")
+            .update({
+                "research_summary": summary,
+                "research_sources": sources,
+                "status": "researched",
+                "researched_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("id", lead_id)
+            .execute()
+        )
+        return result.data[0]
+
+    async def update_enrichment(self, lead_id: str, insight: LeadInsight) -> dict:
+        result = (
+            await self._client.table("leads")
+            .update({
+                "lead_score": insight.lead_score,
+                "score_rationale": insight.score_rationale,
+                "ai_summary": insight.ai_summary,
+                "talking_points": insight.talking_points,
+                "recommended_approach": insight.recommended_approach,
+                "status": "enriched",
+                "enriched_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("id", lead_id)
+            .execute()
+        )
+        return result.data[0]
+
+    async def mark_lead_failed(self, lead_id: str, error: str) -> None:
+        await (
+            self._client.table("leads")
+            .update({"status": "failed", "error_message": error[:500]})
+            .eq("id", lead_id)
+            .execute()
+        )
+
+    # ── Pipeline run tracking ──────────────────────────────────────────────
+    async def create_pipeline_run(self, postal_code: str, country_code: str, distance: int) -> str:
+        result = await (
+            self._client.table("pipeline_runs")
+            .insert({
+                "postal_code": postal_code,
+                "country_code": country_code,
+                "distance": distance,
+            })
+            .execute()
+        )
+        return result.data[0]["id"]
+
+    async def get_pipeline_run(self, run_id: str) -> dict | None:
+        result = (
+            await self._client.table("pipeline_runs")
+            .select("*")
+            .eq("id", run_id)
+            .single()
+            .execute()
+        )
+        return result.data
+
+    async def update_pipeline_progress(self, run_id: str, **kwargs) -> None:
+        await self._client.table("pipeline_runs").update(kwargs).eq("id", run_id).execute()
+
+    async def complete_pipeline_run(self, run_id: str, leads_enriched: int) -> None:
+        await (
+            self._client.table("pipeline_runs")
+            .update({
+                "status": "completed",
+                "leads_enriched": leads_enriched,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("id", run_id)
+            .execute()
+        )
+
+    async def fail_pipeline_run(self, run_id: str, error: str) -> None:
+        await (
+            self._client.table("pipeline_runs")
+            .update({
+                "status": "failed",
+                "error_message": error[:500],
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("id", run_id)
+            .execute()
+        )

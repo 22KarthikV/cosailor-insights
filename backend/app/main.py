@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.routers import leads
 
 app = FastAPI(title="Cosailor Insights API", version="1.0.0")
 
@@ -10,6 +11,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(leads.router, prefix="/api/leads", tags=["leads"])
+
 
 @app.get("/health")
 async def health():
