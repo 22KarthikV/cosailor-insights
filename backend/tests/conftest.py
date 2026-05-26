@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 
 @pytest.fixture
@@ -48,3 +49,74 @@ def sample_lead_row():
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _make_postal_result(lat: float, lon: float):
+    """Create a mock pgeocode query result with given lat/lon."""
+    result = MagicMock()
+    result.latitude = lat
+    result.longitude = lon
+    return result
+
+
+@pytest.fixture
+def mock_pgeocode_same():
+    """Both postal codes map to the same location (0 miles apart)."""
+    with patch("app.services.scorer.pgeocode") as mock_pg:
+        nomi = MagicMock()
+        nomi.query_postal_code.return_value = _make_postal_result(40.7128, -74.0060)
+        mock_pg.Nominatim.return_value = nomi
+        yield mock_pg
+
+
+@pytest.fixture
+def mock_pgeocode_near():
+    """Two postal codes ~1 mile apart — Near band."""
+    with patch("app.services.scorer.pgeocode") as mock_pg:
+        nomi = MagicMock()
+        nomi.query_postal_code.side_effect = [
+            _make_postal_result(40.7128, -74.0060),   # contractor
+            _make_postal_result(40.7178, -74.0020),   # search origin
+        ]
+        mock_pg.Nominatim.return_value = nomi
+        yield mock_pg
+
+
+@pytest.fixture
+def mock_pgeocode_mid():
+    """Two postal codes ~30 miles apart — Mid band."""
+    with patch("app.services.scorer.pgeocode") as mock_pg:
+        nomi = MagicMock()
+        nomi.query_postal_code.side_effect = [
+            _make_postal_result(40.4000, -74.4000),   # contractor (~30 mi from NYC)
+            _make_postal_result(40.7128, -74.0060),   # search origin (NYC)
+        ]
+        mock_pg.Nominatim.return_value = nomi
+        yield mock_pg
+
+
+@pytest.fixture
+def mock_pgeocode_far():
+    """Two postal codes ~100 miles apart — Far band."""
+    with patch("app.services.scorer.pgeocode") as mock_pg:
+        nomi = MagicMock()
+        nomi.query_postal_code.side_effect = [
+            _make_postal_result(41.7658, -72.6851),   # contractor (~100 mi away)
+            _make_postal_result(40.7128, -74.0060),   # search origin
+        ]
+        mock_pg.Nominatim.return_value = nomi
+        yield mock_pg
+
+
+@pytest.fixture
+def mock_pgeocode_invalid():
+    """Postal code lookup returns NaN — should fall back gracefully."""
+    import math
+    with patch("app.services.scorer.pgeocode") as mock_pg:
+        nomi = MagicMock()
+        nomi.query_postal_code.side_effect = [
+            _make_postal_result(math.nan, math.nan),  # invalid
+            _make_postal_result(40.7128, -74.0060),
+        ]
+        mock_pg.Nominatim.return_value = nomi
+        yield mock_pg

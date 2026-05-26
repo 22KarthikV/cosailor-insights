@@ -210,3 +210,88 @@ class TestConvertibilityBaseline:
         svc = ScoringService()
         result = svc.compute_convertibility_baseline("No signals here at all.")
         assert result.baseline >= 1.0
+
+
+class TestDistance:
+    def test_missing_contractor_postal_returns_near_band(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance(None, "10013")
+        assert result.distance_miles is None
+        assert result.distance_band == "near"
+
+    def test_missing_search_postal_returns_near_band(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance("10013", "")
+        assert result.distance_miles is None
+        assert result.distance_band == "near"
+
+    def test_same_postal_code_gives_near_band(self, mock_pgeocode_same):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance("10013", "10013")
+        assert result.distance_band == "near"
+        assert result.distance_miles == pytest.approx(0.0, abs=1.0)
+
+    def test_near_band_0_to_25_miles(self, mock_pgeocode_near):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance("10013", "10001")
+        assert result.distance_band == "near"
+        assert result.distance_miles is not None
+        assert result.distance_miles <= 25.0
+
+    def test_mid_band_26_to_50_miles(self, mock_pgeocode_mid):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance("07001", "10013")
+        assert result.distance_band == "mid"
+        assert 25.0 < result.distance_miles <= 50.0
+
+    def test_far_band_over_50_miles(self, mock_pgeocode_far):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance("06001", "10013")
+        assert result.distance_band == "far"
+        assert result.distance_miles > 50.0
+
+    def test_invalid_postal_returns_near_fallback(self, mock_pgeocode_invalid):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_distance("99999", "10013")
+        assert result.distance_band == "near"
+        assert result.distance_miles is None
+
+
+class TestPriorityIndex:
+    def test_near_band_no_modifier(self):
+        from app.services.scorer import compute_priority_index
+
+        result = compute_priority_index(9, 8, "near")
+        assert result == pytest.approx(8.5)
+
+    def test_mid_band_applies_0_95_modifier(self):
+        from app.services.scorer import compute_priority_index
+
+        result = compute_priority_index(9, 8, "mid")
+        assert result == pytest.approx(8.075)
+
+    def test_far_band_applies_0_90_modifier(self):
+        from app.services.scorer import compute_priority_index
+
+        result = compute_priority_index(9, 8, "far")
+        assert result == pytest.approx(7.65)
+
+    def test_unknown_band_defaults_to_no_modifier(self):
+        from app.services.scorer import compute_priority_index
+
+        result = compute_priority_index(8, 6, "unknown")
+        assert result == pytest.approx(7.0)

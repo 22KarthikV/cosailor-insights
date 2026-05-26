@@ -3,6 +3,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+import pgeocode
+
 
 # ── Data containers ──────────────────────────────────────────────────────────
 
@@ -144,7 +146,44 @@ class ScoringService:
     def compute_distance(
         self, contractor_postal: Optional[str], search_postal: str
     ) -> DistanceResult:
-        raise NotImplementedError
+        if not contractor_postal or not search_postal:
+            return DistanceResult(distance_miles=None, distance_band="near")
+
+        try:
+            nomi = pgeocode.Nominatim("us")
+            dest   = nomi.query_postal_code(contractor_postal)
+            origin = nomi.query_postal_code(search_postal)
+
+            # Guard against NaN values (unrecognised postal codes)
+            coords = [dest.latitude, dest.longitude, origin.latitude, origin.longitude]
+            if any(math.isnan(float(v)) for v in coords):
+                return DistanceResult(distance_miles=None, distance_band="near")
+
+            # Haversine formula
+            lat1 = math.radians(float(origin.latitude))
+            lon1 = math.radians(float(origin.longitude))
+            lat2 = math.radians(float(dest.latitude))
+            lon2 = math.radians(float(dest.longitude))
+
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+            )
+            miles = 6371 * 2 * math.asin(math.sqrt(a)) * 0.621371
+
+            if miles <= 25:
+                band = "near"
+            elif miles <= 50:
+                band = "mid"
+            else:
+                band = "far"
+
+            return DistanceResult(distance_miles=round(miles, 2), distance_band=band)
+
+        except Exception:
+            return DistanceResult(distance_miles=None, distance_band="near")
 
 
 def compute_priority_index(
@@ -153,4 +192,4 @@ def compute_priority_index(
     distance_band: str,
 ) -> float:
     modifier = _DISTANCE_MODIFIER.get(distance_band, 1.0)
-    return round(((lead_score + convertibility_score) / 2) * modifier, 2)
+    return round(((lead_score + convertibility_score) / 2) * modifier, 3)
