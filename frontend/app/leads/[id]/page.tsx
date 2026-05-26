@@ -22,6 +22,17 @@ export default async function LeadDetailPage({ params }: Props) {
         &larr; Back to Dashboard
       </Link>
 
+      {/* Error banner — only shown when enrichment failed */}
+      {lead.status === 'failed' && (
+        <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p className="font-semibold">Enrichment failed</p>
+          {lead.error_message && (
+            <p className="mt-1 text-red-600">{lead.error_message}</p>
+          )}
+        </div>
+      )}
+
+      {/* Header: company info left, dual score column right */}
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{lead.company_name}</h1>
@@ -38,37 +49,79 @@ export default async function LeadDetailPage({ params }: Props) {
             </a>
           )}
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <ScoreBadge score={lead.lead_score} size="lg" />
-          {lead.lead_score !== null && (
-            <div className="w-28">
-              <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
-                <div
-                  className={
-                    'h-2 rounded-full ' +
-                    (lead.lead_score >= 8
-                      ? 'bg-green-500'
-                      : lead.lead_score >= 5
-                        ? 'bg-yellow-500'
-                        : 'bg-red-500')
-                  }
-                  style={{ width: `${Math.min(100, Math.max(0, (lead.lead_score / 10) * 100))}%` }}
-                  role="progressbar"
-                  aria-valuenow={lead.lead_score}
-                  aria-valuemin={0}
-                  aria-valuemax={10}
-                  aria-label={`Lead score: ${lead.lead_score} out of 10`}
-                />
+
+        {/* Dual score column */}
+        <div className="flex flex-row items-start gap-6 shrink-0">
+          {/* Lead Score */}
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs text-gray-400 font-medium">Lead Score</span>
+            <ScoreBadge score={lead.lead_score} size="lg" />
+            {lead.lead_score !== null && (
+              <div className="w-24">
+                <div className="bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className={
+                      'h-1.5 rounded-full ' +
+                      (lead.lead_score >= 8
+                        ? 'bg-green-500'
+                        : lead.lead_score >= 5
+                          ? 'bg-yellow-500'
+                          : 'bg-red-500')
+                    }
+                    style={{ width: `${Math.min(100, Math.max(0, (lead.lead_score / 10) * 100))}%` }}
+                    role="progressbar"
+                    aria-valuenow={lead.lead_score}
+                    aria-valuemin={0}
+                    aria-valuemax={10}
+                    aria-label={`Lead score: ${lead.lead_score} out of 10`}
+                  />
+                </div>
               </div>
-              <p className="text-xs text-gray-500 mt-1 text-right">
-                {lead.lead_score} / 10
+            )}
+            {lead.score_rationale && (
+              <p className="text-xs text-gray-400 italic text-center max-w-[7rem] leading-snug">
+                {lead.score_rationale}
               </p>
+            )}
+          </div>
+
+          {/* Convertibility Score — only rendered when present */}
+          {lead.convertibility_score !== null && (
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs text-gray-400 font-medium">Convertibility</span>
+              <ScoreBadge score={lead.convertibility_score} size="lg" />
+              <div className="w-24">
+                <div className="bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className={
+                      'h-1.5 rounded-full ' +
+                      (lead.convertibility_score >= 8
+                        ? 'bg-green-500'
+                        : lead.convertibility_score >= 5
+                          ? 'bg-yellow-500'
+                          : 'bg-red-500')
+                    }
+                    style={{ width: `${Math.min(100, Math.max(0, (lead.convertibility_score / 10) * 100))}%` }}
+                    role="progressbar"
+                    aria-valuenow={lead.convertibility_score}
+                    aria-valuemin={0}
+                    aria-valuemax={10}
+                    aria-label={`Convertibility score: ${lead.convertibility_score} out of 10`}
+                  />
+                </div>
+              </div>
+              {lead.convertibility_rationale && (
+                <p className="text-xs text-gray-400 italic text-center max-w-[7rem] leading-snug">
+                  {lead.convertibility_rationale}
+                </p>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      {lead.certifications.length > 0 && (
+      {/* Certifications + rating badges */}
+      {(lead.certifications.length > 0 || lead.rating !== null) && (
         <div className="flex flex-wrap gap-2 mb-6">
           {lead.certifications.map((c) => (
             <Badge key={c} variant="secondary">
@@ -84,6 +137,38 @@ export default async function LeadDetailPage({ params }: Props) {
       )}
 
       <div className="space-y-4">
+        {/* Opportunity Signals — distance + priority index */}
+        {(lead.distance_band !== null || lead.priority_index !== null) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">Opportunity Signals</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                {lead.distance_band !== null && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide">Distance</dt>
+                    <dd className="mt-1 font-semibold capitalize">{lead.distance_band}</dd>
+                    {lead.distance_miles !== null && (
+                      <dd className="text-xs text-gray-400">
+                        {lead.distance_miles.toFixed(1)} mi away
+                      </dd>
+                    )}
+                  </div>
+                )}
+                {lead.priority_index !== null && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide">Priority Index</dt>
+                    <dd className="mt-1 font-semibold">{lead.priority_index.toFixed(2)}</dd>
+                    <dd className="text-xs text-gray-400">composite rank</dd>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Sales Summary */}
         {lead.ai_summary && (
           <Card>
             <CardHeader>
@@ -93,13 +178,11 @@ export default async function LeadDetailPage({ params }: Props) {
               <div className="prose prose-sm prose-gray max-w-none">
                 <ReactMarkdown>{lead.ai_summary}</ReactMarkdown>
               </div>
-              {lead.score_rationale && (
-                <p className="text-xs text-gray-500 mt-2 italic">{lead.score_rationale}</p>
-              )}
             </CardContent>
           </Card>
         )}
 
+        {/* Talking Points */}
         {lead.talking_points.length > 0 && (
           <Card>
             <CardHeader>
@@ -118,6 +201,7 @@ export default async function LeadDetailPage({ params }: Props) {
           </Card>
         )}
 
+        {/* Recommended Approach */}
         {lead.recommended_approach && (
           <Card>
             <CardHeader>
@@ -131,6 +215,7 @@ export default async function LeadDetailPage({ params }: Props) {
           </Card>
         )}
 
+        {/* Web Research (Perplexity) */}
         {lead.research_summary && (
           <Card>
             <CardHeader>
@@ -144,6 +229,37 @@ export default async function LeadDetailPage({ params }: Props) {
               </div>
             </CardContent>
           </Card>
+        )}
+      </div>
+
+      {/* Status / meta footer */}
+      <div className="mt-8 pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
+        <span>
+          Status:{' '}
+          <span
+            className={
+              'font-medium capitalize ' +
+              (lead.status === 'enriched'
+                ? 'text-green-600'
+                : lead.status === 'failed'
+                  ? 'text-red-600'
+                  : 'text-gray-500')
+            }
+          >
+            {lead.status}
+          </span>
+        </span>
+        {lead.enriched_at && (
+          <span>
+            Enriched{' '}
+            {new Date(lead.enriched_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
         )}
       </div>
     </div>
