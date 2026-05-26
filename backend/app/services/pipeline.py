@@ -1,8 +1,7 @@
-import asyncio
 import logging
 
 from app.config import ScraperConfig
-from app.models.lead import PipelineRunRequest, ContractorRecord
+from app.models.lead import PipelineRunRequest
 from app.repositories.lead_repository import LeadRepository
 from app.services.enricher import LeadEnricher
 from app.services.researcher import ContractorResearcher
@@ -46,27 +45,20 @@ class PipelineService:
                     row["id"], research.get("summary", ""), research.get("sources", [])
                 )
 
-            # Stage 3: Enrich with Claude + ScoringService (concurrent, max 5 at once)
-            semaphore = asyncio.Semaphore(5)
-
-            async def enrich_one(row: dict, contractor: ContractorRecord, research: dict) -> bool:
-                async with semaphore:
-                    try:
-                        insight = await self._enricher.enrich_async(
-                            contractor, research, search_postal_code=request.postal_code
-                        )
-                        await self._repo.update_enrichment(row["id"], insight)
-                        return True
-                    except Exception as exc:
-                        logger.exception("Enrichment failed for lead %s", row["id"])
-                        await self._repo.mark_lead_failed(row["id"], str(exc))
-                        return False
-
-            results = await asyncio.gather(*[
-                enrich_one(row, c, r)
-                for row, c, r in zip(lead_rows, contractors, research_results)
-            ])
-            enriched = sum(results)
+            # Stage 3: Enrich with Claude + ScoringService
+            enriched = 0
+            for row, contractor, research in zip(lead_rows, contractors, research_results):
+                try:
+                    insight = self._enricher.enrich(
+                        contractor,
+                        research,
+                        search_postal_code=request.postal_code,
+                    )
+                    await self._repo.update_enrichment(row["id"], insight)
+                    enriched += 1
+                except Exception as exc:
+                    logger.exception("Enrichment failed for lead %s", row["id"])
+                    await self._repo.mark_lead_failed(row["id"], str(exc))
 
             await self._repo.complete_pipeline_run(run_id, leads_enriched=enriched)
 

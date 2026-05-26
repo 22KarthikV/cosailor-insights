@@ -34,12 +34,21 @@ class LeadRepository:
         return result.data[0]
 
     async def get_all_leads(self) -> list[dict]:
-        result = (
-            await self._client.table("leads")
-            .select("*")
-            .order("priority_index", desc=True, nullsfirst=False)
-            .execute()
-        )
+        try:
+            result = (
+                await self._client.table("leads")
+                .select("*")
+                .order("priority_index", desc=True, nullsfirst=False)
+                .execute()
+            )
+        except Exception:
+            # Fallback: priority_index column may not exist if migration is pending
+            result = (
+                await self._client.table("leads")
+                .select("*")
+                .order("lead_score", desc=True)
+                .execute()
+            )
         return result.data or []
 
     async def get_lead_by_id(self, lead_id: str) -> dict | None:

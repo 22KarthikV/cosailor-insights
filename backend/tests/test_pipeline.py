@@ -40,7 +40,7 @@ async def test_pipeline_execute_stores_all_enriched_leads(sample_contractor, sam
     mock_researcher.research_all.return_value = [{"summary": "Good.", "sources": []}]
 
     mock_enricher = MagicMock()
-    mock_enricher.enrich_async = AsyncMock(return_value=_insight)
+    mock_enricher.enrich.return_value = _insight
 
     service = PipelineService(
         repo=mock_repo,
@@ -56,13 +56,17 @@ async def test_pipeline_execute_stores_all_enriched_leads(sample_contractor, sam
 
     mock_scraper.scrape_contractors.assert_called_once()
     mock_researcher.research_all.assert_called_once()
-    mock_enricher.enrich_async.assert_called_once()
+    mock_enricher.enrich.assert_called_once_with(
+        sample_contractor,
+        {"summary": "Good.", "sources": []},
+        search_postal_code="10013",
+    )
     mock_repo.update_enrichment.assert_called_once()
     mock_repo.complete_pipeline_run.assert_called_once_with(run_id, leads_enriched=1)
 
 
 @pytest.mark.asyncio
-async def test_pipeline_enriches_multiple_leads_concurrently(sample_contractor, sample_lead_row, _insight):
+async def test_pipeline_enriches_multiple_leads(sample_contractor, sample_lead_row, _insight):
     from app.services.pipeline import PipelineService
 
     mock_repo = AsyncMock()
@@ -80,7 +84,7 @@ async def test_pipeline_enriches_multiple_leads_concurrently(sample_contractor, 
     mock_researcher.research_all.return_value = [{"summary": "Ok.", "sources": []}] * 3
 
     mock_enricher = MagicMock()
-    mock_enricher.enrich_async = AsyncMock(return_value=_insight)
+    mock_enricher.enrich.return_value = _insight
 
     service = PipelineService(
         repo=mock_repo,
@@ -94,7 +98,7 @@ async def test_pipeline_enriches_multiple_leads_concurrently(sample_contractor, 
         request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
     )
 
-    assert mock_enricher.enrich_async.call_count == 3
+    assert mock_enricher.enrich.call_count == 3
     assert mock_repo.update_enrichment.call_count == 3
     mock_repo.complete_pipeline_run.assert_called_once_with("run-123", leads_enriched=3)
 
@@ -120,9 +124,7 @@ async def test_pipeline_continues_when_one_enrichment_fails(sample_contractor, s
     mock_researcher.research_all.return_value = [{"summary": "Ok.", "sources": []}] * 2
 
     mock_enricher = MagicMock()
-    mock_enricher.enrich_async = AsyncMock(
-        side_effect=[RuntimeError("API timeout"), _insight]
-    )
+    mock_enricher.enrich.side_effect = [RuntimeError("API timeout"), _insight]
 
     service = PipelineService(
         repo=mock_repo,
@@ -136,7 +138,7 @@ async def test_pipeline_continues_when_one_enrichment_fails(sample_contractor, s
         request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
     )
 
-    assert mock_enricher.enrich_async.call_count == 2
+    assert mock_enricher.enrich.call_count == 2
     mock_repo.mark_lead_failed.assert_called_once()
     assert mock_repo.update_enrichment.call_count == 1
     mock_repo.complete_pipeline_run.assert_called_once_with("run-fail", leads_enriched=1)
