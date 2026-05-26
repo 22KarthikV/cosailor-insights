@@ -45,4 +45,5 @@ async def pipeline_status(run_id: str):
     run = await repo.get_pipeline_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
-    return run
+    # Supabase returns "id"; PipelineStatusResponse expects "run_id"
+    return {**run, "run_id": run["id"]}

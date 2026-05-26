@@ -44,6 +44,11 @@ CREATE TABLE leads (
 CREATE INDEX idx_leads_lead_score ON leads (lead_score DESC NULLS LAST);
 CREATE INDEX idx_leads_status     ON leads (status);
 
+-- RLS: disabled for both tables — this is a backend-only service (FastAPI is the
+-- sole client). All access goes through the service_role key; user-level RLS is
+-- not needed and causes INSERT/UPDATE to be blocked when no policy matches.
+ALTER TABLE leads DISABLE ROW LEVEL SECURITY;
+
 CREATE TABLE pipeline_runs (
   id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   started_at     TIMESTAMPTZ DEFAULT NOW(),
@@ -57,3 +62,5 @@ CREATE TABLE pipeline_runs (
   leads_enriched INTEGER     DEFAULT 0,
   error_message  TEXT
 );
+
+ALTER TABLE pipeline_runs DISABLE ROW LEVEL SECURITY;
