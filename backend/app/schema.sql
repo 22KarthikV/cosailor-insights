@@ -64,3 +64,13 @@ CREATE TABLE pipeline_runs (
 );
 
 ALTER TABLE pipeline_runs DISABLE ROW LEVEL SECURITY;
+
+-- Migration: scoring redesign (2026-05-26)
+ALTER TABLE leads
+  ADD COLUMN IF NOT EXISTS convertibility_score     INTEGER CHECK (convertibility_score BETWEEN 1 AND 10),
+  ADD COLUMN IF NOT EXISTS convertibility_rationale TEXT,
+  ADD COLUMN IF NOT EXISTS distance_miles           NUMERIC(6,2),
+  ADD COLUMN IF NOT EXISTS distance_band            TEXT CHECK (distance_band IN ('near','mid','far')),
+  ADD COLUMN IF NOT EXISTS priority_index           NUMERIC(4,2);
+
+CREATE INDEX IF NOT EXISTS idx_leads_priority_index ON leads (priority_index DESC NULLS LAST);
