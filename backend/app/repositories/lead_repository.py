@@ -37,7 +37,7 @@ class LeadRepository:
         result = (
             await self._client.table("leads")
             .select("*")
-            .order("lead_score", desc=True)
+            .order("priority_index", desc=True, nullsfirst=False)
             .execute()
         )
         return result.data or []
@@ -70,13 +70,18 @@ class LeadRepository:
         result = (
             await self._client.table("leads")
             .update({
-                "lead_score": insight.lead_score,
-                "score_rationale": insight.score_rationale,
-                "ai_summary": insight.ai_summary,
-                "talking_points": insight.talking_points,
-                "recommended_approach": insight.recommended_approach,
-                "status": "enriched",
-                "enriched_at": datetime.now(timezone.utc).isoformat(),
+                "lead_score":               insight.lead_score,
+                "score_rationale":          insight.score_rationale,
+                "convertibility_score":     insight.convertibility_score,
+                "convertibility_rationale": insight.convertibility_rationale,
+                "distance_miles":           insight.distance_miles,
+                "distance_band":            insight.distance_band,
+                "priority_index":           insight.priority_index,
+                "ai_summary":               insight.ai_summary,
+                "talking_points":           insight.talking_points,
+                "recommended_approach":     insight.recommended_approach,
+                "status":                   "enriched",
+                "enriched_at":              datetime.now(timezone.utc).isoformat(),
             })
             .eq("id", lead_id)
             .execute()

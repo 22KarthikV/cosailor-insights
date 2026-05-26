@@ -57,6 +57,11 @@ async def test_update_enrichment_sets_status_to_enriched():
     insight = LeadInsight(
         lead_score=9,
         score_rationale="Master Elite",
+        convertibility_score=7,
+        convertibility_rationale="Competitor brands detected.",
+        distance_miles=5.2,
+        distance_band="near",
+        priority_index=8.0,
         ai_summary="High priority lead.",
         talking_points=["Point 1", "Point 2", "Point 3"],
         recommended_approach="Call owner.",
@@ -76,4 +81,5 @@ async def test_update_enrichment_sets_status_to_enriched():
     assert result["id"] == lead_id
     call_data = mock_table.update.call_args[0][0]
     assert call_data["lead_score"] == 9
+    assert call_data["convertibility_score"] == 7
     assert call_data["status"] == "enriched"
