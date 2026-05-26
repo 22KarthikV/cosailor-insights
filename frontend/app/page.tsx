@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { LeadsGrid } from '@/components/LeadsGrid';
+import { LeadsGridClient } from '@/components/LeadsGridClient';
 import { PipelineControls } from '@/components/PipelineControls';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getLeads } from '@/lib/api';
@@ -12,7 +12,7 @@ async function LeadsSection() {
   } catch {
     /* backend not running */
   }
-  return <LeadsGrid leads={leads} />;
+  return <LeadsGridClient leads={leads} />;
 }
 
 export default function DashboardPage() {
