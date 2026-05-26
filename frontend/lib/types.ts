@@ -13,6 +13,11 @@ export interface Lead {
   research_summary: string | null;
   lead_score: number | null;
   score_rationale: string | null;
+  convertibility_score: number | null;
+  convertibility_rationale: string | null;
+  distance_miles: number | null;
+  distance_band: 'near' | 'mid' | 'far' | null;
+  priority_index: number | null;
   ai_summary: string | null;
   talking_points: string[];
   recommended_approach: string | null;
