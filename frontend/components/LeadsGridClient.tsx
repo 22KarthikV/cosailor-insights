@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { LeadCard } from './LeadCard';
 import type { Lead } from '@/lib/types';
 
@@ -81,19 +81,93 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: 'recently_enriched', label: 'Recently Enriched' },
 ];
 
-export function LeadsGridClient({ leads }: LeadsGridClientProps) {
+interface StatsBarProps {
+  total: number;
+  enrichedCount: number;
+  avgScore: string;
+}
+
+function StatsBar({ total, enrichedCount, avgScore }: StatsBarProps): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap gap-3">
+      <StatChip label="Total Leads" value={total} />
+      <StatChip label="Avg Score" value={avgScore} />
+      <StatChip label="Enriched" value={`${enrichedCount} / ${total}`} />
+    </div>
+  );
+}
+
+interface LeadFilterControlsProps {
+  scoreFilter: ScoreFilter;
+  sortOption: SortOption;
+  resultCount: number;
+  onFilterChange: (f: ScoreFilter) => void;
+  onSortChange: (s: SortOption) => void;
+}
+
+function LeadFilterControls({
+  scoreFilter,
+  sortOption,
+  resultCount,
+  onFilterChange,
+  onSortChange,
+}: LeadFilterControlsProps): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <div
+        className="flex items-center gap-0 rounded border border-gray-200 overflow-hidden"
+        role="group"
+        aria-label="Filter by score"
+      >
+        {SCORE_FILTER_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onFilterChange(opt.value)}
+            className={
+              'px-3 py-1 text-xs border-r border-gray-200 last:border-r-0 transition-colors ' +
+              (scoreFilter === opt.value
+                ? 'bg-blue-600 text-white font-medium'
+                : 'bg-white text-gray-600 hover:bg-gray-100')
+            }
+            aria-pressed={scoreFilter === opt.value}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <select
+        value={sortOption}
+        onChange={(e) => onSortChange(e.target.value as SortOption)}
+        className="border border-gray-200 rounded px-3 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+        aria-label="Sort leads"
+      >
+        {SORT_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+
+      {scoreFilter !== 'all' && (
+        <span className="text-xs text-gray-400">
+          {resultCount} result{resultCount !== 1 ? 's' : ''}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function LeadsGridClient({ leads }: LeadsGridClientProps): React.JSX.Element {
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [sortOption, setSortOption] = useState<SortOption>('score_desc');
 
-  const { total, enrichedCount, avgScore } = useMemo(
-    () => computeStats(leads),
-    [leads]
+  const { total, enrichedCount, avgScore } = useMemo(() => computeStats(leads), [leads]);
+  const displayedLeads = useMemo(
+    () => sortLeads(filterLeads(leads, scoreFilter), sortOption),
+    [leads, scoreFilter, sortOption]
   );
-
-  const displayedLeads = useMemo(() => {
-    const filtered = filterLeads(leads, scoreFilter);
-    return sortLeads(filtered, sortOption);
-  }, [leads, scoreFilter, sortOption]);
 
   if (leads.length === 0) {
     return (
@@ -107,68 +181,18 @@ export function LeadsGridClient({ leads }: LeadsGridClientProps) {
 
   return (
     <div className="space-y-4">
-      {/* Stats Bar */}
-      <div className="flex flex-wrap gap-3">
-        <StatChip label="Total Leads" value={total} />
-        <StatChip
-          label="Avg Score"
-          value={avgScore !== null ? avgScore.toFixed(1) : '—'}
-        />
-        <StatChip
-          label="Enriched"
-          value={`${enrichedCount} / ${total}`}
-        />
-      </div>
-
-      {/* Filter + Sort Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Score filter button group */}
-        <div
-          className="flex items-center gap-0 rounded border border-gray-200 overflow-hidden"
-          role="group"
-          aria-label="Filter by score"
-        >
-          {SCORE_FILTER_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setScoreFilter(opt.value)}
-              className={
-                'px-3 py-1 text-xs border-r border-gray-200 last:border-r-0 transition-colors ' +
-                (scoreFilter === opt.value
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'bg-white text-gray-600 hover:bg-gray-100')
-              }
-              aria-pressed={scoreFilter === opt.value}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Sort select */}
-        <select
-          value={sortOption}
-          onChange={(e) => setSortOption(e.target.value as SortOption)}
-          className="border border-gray-200 rounded px-3 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
-          aria-label="Sort leads"
-        >
-          {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-
-        {/* Result count */}
-        {scoreFilter !== 'all' && (
-          <span className="text-xs text-gray-400">
-            {displayedLeads.length} result{displayedLeads.length !== 1 ? 's' : ''}
-          </span>
-        )}
-      </div>
-
-      {/* Leads Grid */}
+      <StatsBar
+        total={total}
+        enrichedCount={enrichedCount}
+        avgScore={avgScore !== null ? avgScore.toFixed(1) : '—'}
+      />
+      <LeadFilterControls
+        scoreFilter={scoreFilter}
+        sortOption={sortOption}
+        resultCount={displayedLeads.length}
+        onFilterChange={setScoreFilter}
+        onSortChange={setSortOption}
+      />
       {displayedLeads.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500 text-sm">No leads match the selected filter.</p>

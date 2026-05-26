@@ -9,8 +9,9 @@ async function LeadsSection() {
   let leads: Lead[] = [];
   try {
     leads = await getLeads();
-  } catch {
-    /* backend not running */
+  } catch (err) {
+    console.error('[LeadsSection] Failed to fetch leads:', err);
+    /* backend not running or returned an error */
   }
   return <LeadsGridClient leads={leads} />;
 }
