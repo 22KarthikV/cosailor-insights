@@ -24,7 +24,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Cosailor Insights</h1>
             <p className="text-sm text-gray-500 mt-1">
-              GAF Roofing Contractors &middot; ZIP 10013 &middot; 25-mile radius
+              GAF Roofing Contractors &middot; Commercial &middot; United States
             </p>
           </div>
           <PipelineControls />

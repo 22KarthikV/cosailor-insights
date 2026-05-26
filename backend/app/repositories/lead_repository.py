@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from postgrest.exceptions import APIError
 from app.models.lead import ContractorRecord, LeadInsight
 
 
