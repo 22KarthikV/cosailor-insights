@@ -25,6 +25,11 @@ class ContractorRecord(BaseModel):
 class LeadInsight(BaseModel):
     lead_score: int = Field(..., ge=1, le=10)
     score_rationale: str
+    convertibility_score: int = Field(..., ge=1, le=10)
+    convertibility_rationale: str
+    distance_miles: Optional[float] = None
+    distance_band: str = "near"
+    priority_index: float = 0.0
     ai_summary: str
     talking_points: list[str] = Field(..., min_length=1, max_length=3)
     recommended_approach: str
@@ -45,6 +50,11 @@ class LeadResponse(BaseModel):
     research_summary: Optional[str] = None
     lead_score: Optional[int] = None
     score_rationale: Optional[str] = None
+    convertibility_score: Optional[int] = None
+    convertibility_rationale: Optional[str] = None
+    distance_miles: Optional[float] = None
+    distance_band: Optional[str] = None
+    priority_index: Optional[float] = None
     ai_summary: Optional[str] = None
     talking_points: list[str] = []
     recommended_approach: Optional[str] = None
