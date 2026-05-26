@@ -22,7 +22,7 @@ export function ScoreBadge({ score, size = 'sm' }: ScoreBadgeProps) {
     size === 'lg' ? 'text-2xl font-bold px-4 py-2' : 'text-xs font-semibold px-2.5 py-1';
 
   return (
-    <span className={`inline-flex items-center rounded-full ${color} ${sizeClass}`}>
+    <span className={`inline-flex items-center rounded-full whitespace-nowrap ${color} ${sizeClass}`}>
       {size === 'lg' ? score : `${score}/10`}
     </span>
   );

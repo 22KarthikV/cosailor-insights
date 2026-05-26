@@ -207,7 +207,7 @@ export function LeadsGridClient({ leads: initialLeads }: LeadsGridClientProps): 
           {displayedLeads.map((lead) => (
             <div
               key={lead.id}
-              className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+              className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-full"
             >
               <LeadCard lead={lead} />
             </div>
