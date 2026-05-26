@@ -44,7 +44,7 @@ function filterLeads(leads: Lead[], filter: ScoreFilter): Lead[] {
     if (l.lead_score === null) return false;
     if (filter === 'high') return l.lead_score >= 8 && l.lead_score <= 10;
     if (filter === 'medium') return l.lead_score >= 5 && l.lead_score <= 7;
-    if (filter === 'low') return l.lead_score >= 1 && l.lead_score <= 4;
+    if (filter === 'low') return l.lead_score >= 0 && l.lead_score <= 4;
     return true;
   });
 }

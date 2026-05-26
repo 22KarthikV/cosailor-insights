@@ -11,12 +11,7 @@ interface Props {
 
 export default async function LeadDetailPage({ params }: Props) {
   const { id } = await params;
-  let lead;
-  try {
-    lead = await getLead(id);
-  } catch {
-    notFound();
-  }
+  const lead = await getLead(id).catch(() => notFound());
 
   const location = [lead.city, lead.state].filter(Boolean).join(', ');
 
@@ -56,7 +51,7 @@ export default async function LeadDetailPage({ params }: Props) {
                         ? 'bg-yellow-500'
                         : 'bg-red-500')
                   }
-                  style={{ width: `${(lead.lead_score / 10) * 100}%` }}
+                  style={{ width: `${Math.min(100, Math.max(0, (lead.lead_score / 10) * 100))}%` }}
                   role="progressbar"
                   aria-valuenow={lead.lead_score}
                   aria-valuemin={0}
