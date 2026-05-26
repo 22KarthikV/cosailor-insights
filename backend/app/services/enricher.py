@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from anthropic import Anthropic
@@ -59,6 +60,10 @@ class LeadEnricher:
         data["lead_score"] = max(1, min(10, int(data.get("lead_score", 5))))
         data["talking_points"] = data.get("talking_points", [])[:3]
         return LeadInsight(**data)
+
+    async def enrich_async(self, contractor: ContractorRecord, research: dict) -> LeadInsight:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.enrich, contractor, research)
 
     @staticmethod
     def _parse(raw: str) -> dict:

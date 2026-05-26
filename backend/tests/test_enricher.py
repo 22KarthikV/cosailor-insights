@@ -69,3 +69,24 @@ def test_enricher_clamps_score_out_of_range(sample_contractor):
         insight = enricher.enrich(sample_contractor, {})
 
     assert 1 <= insight.lead_score <= 10
+
+
+@pytest.mark.asyncio
+async def test_enrich_async_returns_lead_insight(sample_contractor):
+    from app.services.enricher import LeadEnricher
+    from app.models.lead import LeadInsight
+
+    mock_msg = MagicMock()
+    mock_msg.content = [MagicMock(text=MOCK_JSON)]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_msg
+
+    with patch("app.services.enricher.Anthropic", return_value=mock_client):
+        enricher = LeadEnricher(api_key="test-key")
+        insight = await enricher.enrich_async(
+            sample_contractor, {"summary": "Strong.", "sources": []}
+        )
+
+    assert isinstance(insight, LeadInsight)
+    assert insight.lead_score == 9
+    assert len(insight.talking_points) == 3
