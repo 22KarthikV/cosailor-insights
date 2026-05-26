@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeadCard } from './LeadCard';
 import type { Lead } from '@/lib/types';
+import { useLeadsRealtime } from '@/hooks/useLeadsRealtime';
 
 type ScoreFilter = 'all' | 'high' | 'medium' | 'low';
 type SortOption = 'score_desc' | 'name_asc' | 'recently_enriched';
@@ -159,7 +160,8 @@ function LeadFilterControls({
   );
 }
 
-export function LeadsGridClient({ leads }: LeadsGridClientProps): React.JSX.Element {
+export function LeadsGridClient({ leads: initialLeads }: LeadsGridClientProps): React.JSX.Element {
+  const leads = useLeadsRealtime(initialLeads)
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [sortOption, setSortOption] = useState<SortOption>('score_desc');
 
@@ -203,7 +205,12 @@ export function LeadsGridClient({ leads }: LeadsGridClientProps): React.JSX.Elem
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {displayedLeads.map((lead) => (
-            <LeadCard key={lead.id} lead={lead} />
+            <div
+              key={lead.id}
+              className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+            >
+              <LeadCard lead={lead} />
+            </div>
           ))}
         </div>
       )}
