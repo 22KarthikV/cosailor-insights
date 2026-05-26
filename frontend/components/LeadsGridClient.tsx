@@ -29,7 +29,7 @@ function computeStats(leads: Lead[]) {
   const total = leads.length;
   const enrichedLeads = leads.filter((l) => l.status === 'enriched');
   const enrichedCount = enrichedLeads.length;
-  const scoredLeads = leads.filter((l) => l.lead_score !== null);
+  const scoredLeads = leads.filter((l) => l.status === 'enriched' && l.lead_score !== null);
   const avgScore =
     scoredLeads.length > 0
       ? scoredLeads.reduce((sum, l) => sum + (l.lead_score as number), 0) / scoredLeads.length
