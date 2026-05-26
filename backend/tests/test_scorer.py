@@ -112,3 +112,101 @@ class TestLeadBaseline:
         )
         result = svc.compute_lead_baseline(c)
         assert result.baseline >= 1.0
+
+
+class TestConvertibilityBaseline:
+    def test_empty_research_returns_all_false_baseline_1(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(None)
+        assert result.portfolio_gap_detected is False
+        assert result.growth_signal_detected is False
+        assert result.cert_momentum_detected is False
+        assert result.baseline == 1.0
+
+    def test_empty_string_research_returns_baseline_1(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline("")
+        assert result.baseline == 1.0
+
+    def test_competitor_brand_detected_as_portfolio_gap(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "The company uses Owens Corning and IKO shingles."
+        )
+        assert result.portfolio_gap_detected is True
+
+    def test_exclusive_gaf_suppresses_portfolio_gap(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "They exclusively GAF products and also mentioned CertainTeed once."
+        )
+        assert result.portfolio_gap_detected is False
+
+    def test_growth_keywords_detected(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "The company is expanding into new markets and hiring aggressively."
+        )
+        assert result.growth_signal_detected is True
+
+    def test_cert_momentum_detected(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "They recently certified as a GAF Master Elite contractor."
+        )
+        assert result.cert_momentum_detected is True
+
+    def test_all_three_signals_gives_baseline_10(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "They use Owens Corning and are expanding. They recently certified."
+        )
+        assert result.portfolio_gap_detected is True
+        assert result.growth_signal_detected is True
+        assert result.cert_momentum_detected is True
+        assert result.baseline == 10.0
+
+    def test_portfolio_gap_only_gives_baseline_4(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "They use Owens Corning shingles."
+        )
+        assert result.portfolio_gap_detected is True
+        assert result.growth_signal_detected is False
+        assert result.cert_momentum_detected is False
+        # 10 * 0.40 = 4.0
+        assert result.baseline == 4.0
+
+    def test_growth_only_gives_baseline_4(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline(
+            "They are hiring and expanding rapidly."
+        )
+        # 10 * 0.35 = 3.5 → round(3.5) = 4 (Python banker's rounding)
+        assert result.growth_signal_detected is True
+        assert result.baseline == 4.0
+
+    def test_baseline_never_below_1(self):
+        from app.services.scorer import ScoringService
+
+        svc = ScoringService()
+        result = svc.compute_convertibility_baseline("No signals here at all.")
+        assert result.baseline >= 1.0

@@ -106,7 +106,40 @@ class ScoringService:
     def compute_convertibility_baseline(
         self, research_text: Optional[str]
     ) -> ConvertibilityComponents:
-        raise NotImplementedError
+        if not research_text:
+            return ConvertibilityComponents(
+                portfolio_gap_detected=False,
+                growth_signal_detected=False,
+                cert_momentum_detected=False,
+                baseline=1.0,
+            )
+
+        text_lower = research_text.lower()
+
+        # Portfolio gap: competitor brands present, no exclusive-GAF language
+        has_competitor = any(brand in text_lower for brand in _COMPETITOR_BRANDS)
+        has_exclusive = bool(_EXCLUSIVE_GAF.search(research_text))
+        portfolio_gap = has_competitor and not has_exclusive
+
+        # Growth signals
+        growth = any(kw in text_lower for kw in _GROWTH_KEYWORDS)
+
+        # Certification momentum
+        cert_momentum = any(kw in text_lower for kw in _CERT_MOMENTUM_KEYWORDS)
+
+        raw = (
+            (10.0 * 0.40 if portfolio_gap  else 0.0) +
+            (10.0 * 0.35 if growth         else 0.0) +
+            (10.0 * 0.25 if cert_momentum  else 0.0)
+        )
+        baseline = float(max(1, round(raw)))
+
+        return ConvertibilityComponents(
+            portfolio_gap_detected=portfolio_gap,
+            growth_signal_detected=growth,
+            cert_momentum_detected=cert_momentum,
+            baseline=baseline,
+        )
 
     def compute_distance(
         self, contractor_postal: Optional[str], search_postal: str
