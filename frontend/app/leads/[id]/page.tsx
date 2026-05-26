@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -89,7 +90,9 @@ export default async function LeadDetailPage({ params }: Props) {
               <CardTitle className="text-sm font-semibold">Sales Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-gray-700 leading-relaxed">{lead.ai_summary}</p>
+              <div className="prose prose-sm prose-gray max-w-none">
+                <ReactMarkdown>{lead.ai_summary}</ReactMarkdown>
+              </div>
               {lead.score_rationale && (
                 <p className="text-xs text-gray-500 mt-2 italic">{lead.score_rationale}</p>
               )}
@@ -121,7 +124,9 @@ export default async function LeadDetailPage({ params }: Props) {
               <CardTitle className="text-sm font-semibold">Recommended Approach</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-gray-700 leading-relaxed">{lead.recommended_approach}</p>
+              <div className="prose prose-sm prose-gray max-w-none">
+                <ReactMarkdown>{lead.recommended_approach}</ReactMarkdown>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -134,9 +139,9 @@ export default async function LeadDetailPage({ params }: Props) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-gray-500 leading-relaxed whitespace-pre-line">
-                {lead.research_summary}
-              </p>
+              <div className="prose prose-xs prose-gray max-w-none text-xs leading-relaxed">
+                <ReactMarkdown>{lead.research_summary}</ReactMarkdown>
+              </div>
             </CardContent>
           </Card>
         )}
