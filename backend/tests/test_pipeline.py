@@ -95,3 +95,54 @@ async def test_pipeline_enriches_multiple_leads_concurrently(sample_contractor, 
     assert mock_enricher.enrich_async.call_count == 3
     assert mock_repo.update_enrichment.call_count == 3
     mock_repo.complete_pipeline_run.assert_called_once_with("run-123", leads_enriched=3)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_continues_when_one_enrichment_fails(sample_contractor, sample_lead_row):
+    from app.services.pipeline import PipelineService
+    from app.models.lead import LeadInsight
+
+    insight = LeadInsight(
+        lead_score=7, score_rationale="GAF Certified",
+        convertibility_score=6, convertibility_rationale="Medium conversion potential.",
+        ai_summary="Good lead.", talking_points=["P1", "P2", "P3"],
+        recommended_approach="Email first."
+    )
+
+    mock_repo = AsyncMock()
+    mock_repo.update_pipeline_progress = AsyncMock()
+    mock_repo.upsert_contractor.side_effect = [
+        {**sample_lead_row, "id": "lead-0"},
+        {**sample_lead_row, "id": "lead-1"},
+    ]
+    mock_repo.update_enrichment = AsyncMock()
+    mock_repo.mark_lead_failed = AsyncMock()
+    mock_repo.complete_pipeline_run = AsyncMock()
+
+    mock_scraper = MagicMock()
+    mock_scraper.scrape_contractors.return_value = [sample_contractor] * 2
+
+    mock_researcher = AsyncMock()
+    mock_researcher.research_all.return_value = [{"summary": "Ok.", "sources": []}] * 2
+
+    mock_enricher = MagicMock()
+    mock_enricher.enrich_async = AsyncMock(
+        side_effect=[RuntimeError("API timeout"), insight]
+    )
+
+    service = PipelineService(
+        repo=mock_repo,
+        scraper=mock_scraper,
+        researcher=mock_researcher,
+        enricher=mock_enricher,
+    )
+
+    await service.execute(
+        run_id="run-fail",
+        request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None)
+    )
+
+    assert mock_enricher.enrich_async.call_count == 2
+    mock_repo.mark_lead_failed.assert_called_once()
+    assert mock_repo.update_enrichment.call_count == 1
+    mock_repo.complete_pipeline_run.assert_called_once_with("run-fail", leads_enriched=1)

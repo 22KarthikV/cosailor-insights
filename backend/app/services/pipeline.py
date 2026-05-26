@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from app.config import ScraperConfig
-from app.models.lead import PipelineRunRequest
+from app.models.lead import ContractorRecord, PipelineRunRequest
 from app.repositories.lead_repository import LeadRepository
 from app.services.enricher import LeadEnricher
 from app.services.researcher import ContractorResearcher
@@ -49,7 +49,7 @@ class PipelineService:
             # Stage 3: Enrich with Claude (concurrent, max 5 at once)
             semaphore = asyncio.Semaphore(5)
 
-            async def enrich_one(row: dict, contractor: object, research: dict) -> bool:
+            async def enrich_one(row: dict, contractor: ContractorRecord, research: dict) -> bool:
                 async with semaphore:
                     try:
                         insight = await self._enricher.enrich_async(contractor, research)
