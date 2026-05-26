@@ -7,8 +7,8 @@ _SYSTEM = """You are a B2B sales research assistant for a roofing materials dist
 Gather factual intelligence about roofing contractors for sales outreach preparation.
 Be concise. Focus only on B2B-relevant information."""
 
-_CONCURRENCY = 3
-_DELAY = 1.2
+_CONCURRENCY = 5
+_DELAY = 0.8
 
 
 def _build_prompt(c: ContractorRecord) -> str:
