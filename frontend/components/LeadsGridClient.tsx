@@ -171,10 +171,12 @@ export function LeadsGridClient({ leads }: LeadsGridClientProps): React.JSX.Elem
 
   if (leads.length === 0) {
     return (
-      <div className="text-center py-24">
-        <div className="text-5xl mb-4">🏠</div>
-        <p className="text-lg font-medium text-gray-500">No leads yet</p>
-        <p className="text-sm text-gray-400 mt-1">Run the pipeline to generate leads.</p>
+      <div className="text-center py-16 text-gray-500">
+        <div className="text-5xl mb-4">📋</div>
+        <p className="text-lg font-medium text-gray-700">No leads yet</p>
+        <p className="text-sm text-gray-500 mt-1">
+          Run the pipeline to scrape and enrich GAF contractors.
+        </p>
       </div>
     );
   }
@@ -186,6 +188,7 @@ export function LeadsGridClient({ leads }: LeadsGridClientProps): React.JSX.Elem
         enrichedCount={enrichedCount}
         avgScore={avgScore !== null ? avgScore.toFixed(1) : '—'}
       />
+      <p className="text-xs text-gray-400 mb-2">{leads.length} contractors found</p>
       <LeadFilterControls
         scoreFilter={scoreFilter}
         sortOption={sortOption}

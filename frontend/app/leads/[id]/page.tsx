@@ -42,7 +42,34 @@ export default async function LeadDetailPage({ params }: Props) {
             </a>
           )}
         </div>
-        <ScoreBadge score={lead.lead_score} size="lg" />
+        <div className="flex flex-col items-end gap-2">
+          <ScoreBadge score={lead.lead_score} size="lg" />
+          {lead.lead_score !== null && (
+            <div className="w-28">
+              <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                <div
+                  className={
+                    'h-2 rounded-full ' +
+                    (lead.lead_score >= 8
+                      ? 'bg-green-500'
+                      : lead.lead_score >= 5
+                        ? 'bg-yellow-500'
+                        : 'bg-red-500')
+                  }
+                  style={{ width: `${(lead.lead_score / 10) * 100}%` }}
+                  role="progressbar"
+                  aria-valuenow={lead.lead_score}
+                  aria-valuemin={0}
+                  aria-valuemax={10}
+                  aria-label={`Lead score: ${lead.lead_score} out of 10`}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1 text-right">
+                {lead.lead_score} / 10
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {lead.certifications.length > 0 && (
