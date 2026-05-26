@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { triggerPipeline, getPipelineStatus } from '@/lib/api';
@@ -9,7 +9,10 @@ import type { PipelineStatusResponse } from '@/lib/types';
 const DISTANCE_OPTIONS = [25, 50, 100] as const;
 type DistanceOption = (typeof DISTANCE_OPTIONS)[number];
 
-export function PipelineControls() {
+const DEFAULT_COUNTRY_CODE = 'us' as const;
+const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
+
+export function PipelineControls(): React.JSX.Element {
   const router = useRouter();
   const [runId, setRunId] = useState<string | null>(null);
   const [pipeStatus, setPipeStatus] = useState<PipelineStatusResponse | null>(null);
@@ -19,13 +22,14 @@ export function PipelineControls() {
   const [distance, setDistance] = useState<DistanceOption>(25);
 
   const isRunning = pipeStatus?.status === 'running';
-  const isSubmitDisabled = loading || isRunning || postalCode.trim() === '';
+  const isValidPostalCode = US_ZIP_REGEX.test(postalCode.trim());
+  const isSubmitDisabled = loading || isRunning || postalCode.trim() === '' || !isValidPostalCode;
 
   const handleRun = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await triggerPipeline(postalCode.trim(), 'us', distance);
+      const data = await triggerPipeline(postalCode.trim(), DEFAULT_COUNTRY_CODE, distance);
       setRunId(data.run_id);
       setPipeStatus({
         run_id: data.run_id,
@@ -78,6 +82,9 @@ export function PipelineControls() {
           placeholder="e.g. 10013"
           className="h-9 w-28 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         />
+        {postalCode.length > 0 && !isValidPostalCode && (
+          <p className="text-xs text-red-500 mt-1">Enter a valid US ZIP code</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-1">
