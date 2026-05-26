@@ -21,7 +21,8 @@ export function useLeadsRealtime(initialLeads: Lead[]): Lead[] {
           event: 'UPDATE',
           schema: 'public',
           table: 'leads',
-          filter: 'status=eq.enriched',
+          // No server-side filter: filtered postgres_changes require RLS to be enabled.
+          // All UPDATE events flow through; stale leads are merged by id below.
         },
         (payload) => {
           const incoming = payload.new as Lead
