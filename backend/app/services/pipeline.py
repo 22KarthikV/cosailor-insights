@@ -105,6 +105,7 @@ class PipelineService:
 
         results = await asyncio.gather(
             *[enrich_one(row, contractor, research)
-              for row, contractor, research in zip(lead_rows, contractors, research_results)]
+              for row, contractor, research in zip(lead_rows, contractors, research_results)],
+            return_exceptions=True,
         )
-        return sum(1 for r in results if r)
+        return sum(1 for r in results if r is True)
