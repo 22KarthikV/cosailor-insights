@@ -27,7 +27,10 @@ async def list_leads(
 ):
     """Return a page of leads sorted by priority_index descending."""
     repo = await _get_repo()
-    result = await repo.get_all_leads(page=page, limit=limit)
+    try:
+        result = await repo.get_all_leads(page=page, limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail="Unable to retrieve leads at this time") from exc
     return result
 
 

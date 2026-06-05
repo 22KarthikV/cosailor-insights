@@ -74,13 +74,16 @@ class LeadRepository:
                 .execute()
             )
         except Exception:
-            result = (
-                await self._client.table("leads")
-                .select("*", count="exact")
-                .order("lead_score", desc=True)
-                .range(offset, offset + limit - 1)
-                .execute()
-            )
+            try:
+                result = (
+                    await self._client.table("leads")
+                    .select("*", count="exact")
+                    .order("lead_score", desc=True)
+                    .range(offset, offset + limit - 1)
+                    .execute()
+                )
+            except Exception as exc:
+                raise RuntimeError(f"Failed to fetch leads (page={page}, limit={limit})") from exc
         return {
             "leads": result.data or [],
             "total": result.count or 0,
