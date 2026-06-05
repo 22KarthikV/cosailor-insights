@@ -79,10 +79,15 @@ export function PipelineControls(): React.JSX.Element {
         const status = await getPipelineStatus(runId);
         if (!isMounted.current) return;
         setPipeStatus(status);
-        // Always revalidate + refresh — shows partial cards during scraping
-        // and progressively filled cards during enrichment.
         await revalidateLeads();
-        router.refresh();
+        // Refresh only on page 1 to avoid racing with pagination router.push.
+        // Realtime subscription handles in-place updates for other pages.
+        const onFirstPage = !window.location.search
+          || !window.location.search.includes('page=')
+          || window.location.search.includes('page=1');
+        if (onFirstPage) {
+          router.refresh();
+        }
         if (status.status === 'completed' || status.status === 'failed') {
           clearInterval(interval);
         }
