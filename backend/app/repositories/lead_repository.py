@@ -58,28 +58,35 @@ class LeadRepository:
         )
         return result.data[0]
 
-    async def get_all_leads(self) -> list[dict]:
-        """Return all leads ordered by priority_index descending.
+    async def get_all_leads(self, page: int = 1, limit: int = 12) -> dict:
+        """Return a page of leads ordered by priority_index descending.
 
-        Falls back to ordering by lead_score when priority_index does not yet
-        exist in the schema (e.g. the scoring-redesign migration is pending).
+        Uses Supabase count="exact" to fetch total row count in one round-trip.
+        Falls back to ordering by lead_score when priority_index column is missing.
         """
+        offset = (page - 1) * limit
         try:
             result = (
                 await self._client.table("leads")
-                .select("*")
+                .select("*", count="exact")
                 .order("priority_index", desc=True, nullsfirst=False)
+                .range(offset, offset + limit - 1)
                 .execute()
             )
         except Exception:
-            # Fallback: priority_index column may not exist if migration is pending
             result = (
                 await self._client.table("leads")
-                .select("*")
+                .select("*", count="exact")
                 .order("lead_score", desc=True)
+                .range(offset, offset + limit - 1)
                 .execute()
             )
-        return result.data or []
+        return {
+            "leads": result.data or [],
+            "total": result.count or 0,
+            "page": page,
+            "limit": limit,
+        }
 
     async def get_lead_by_id(self, lead_id: str) -> dict | None:
         """Fetch a single lead row by UUID. Returns None if not found."""

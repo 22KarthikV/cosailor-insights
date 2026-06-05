@@ -89,6 +89,14 @@ class LeadResponse(BaseModel):
     created_at: datetime
 
 
+class PaginatedLeadsResponse(BaseModel):
+    """Paginated response envelope for GET /api/leads."""
+    leads: list[LeadResponse]
+    total: int
+    page: int
+    limit: int
+
+
 class PipelineRunRequest(BaseModel):
     """Parameters for triggering a new pipeline run via POST /api/pipeline/run."""
     postal_code: str = "10013"

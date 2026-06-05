@@ -4,11 +4,11 @@ Mounted at /api/leads by main.py. A fresh Supabase async client is
 created per request — there is no shared connection pool because the
 Supabase Python client manages its own HTTP sessions internally.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from supabase import acreate_client
 
 from app.config import settings
-from app.models.lead import LeadResponse
+from app.models.lead import LeadResponse, PaginatedLeadsResponse
 from app.repositories.lead_repository import LeadRepository
 
 router = APIRouter()
@@ -20,12 +20,15 @@ async def _get_repo() -> LeadRepository:
     return LeadRepository(client)
 
 
-@router.get("/", response_model=list[LeadResponse])
-async def list_leads():
-    """Return all leads sorted by priority_index descending."""
+@router.get("/", response_model=PaginatedLeadsResponse)
+async def list_leads(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=12, ge=1, le=100),
+):
+    """Return a page of leads sorted by priority_index descending."""
     repo = await _get_repo()
-    rows = await repo.get_all_leads()
-    return rows
+    result = await repo.get_all_leads(page=page, limit=limit)
+    return result
 
 
 @router.get("/{lead_id}", response_model=LeadResponse)

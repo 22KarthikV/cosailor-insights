@@ -39,15 +39,15 @@ async def test_upsert_contractor_returns_row_with_id(sample_contractor):
 
 @pytest.mark.asyncio
 async def test_get_all_leads_returns_list_ordered_by_score(sample_lead_row):
-    """get_all_leads returns the list from Supabase as-is."""
+    """get_all_leads returns the list from Supabase inside a paginated envelope."""
     from app.repositories.lead_repository import LeadRepository
 
     mock_result = MagicMock()
     mock_result.data = [sample_lead_row]
+    mock_result.count = 1
 
-    # .select().order().execute() — all sync except execute
     mock_table = MagicMock()
-    mock_table.select.return_value.order.return_value.execute = AsyncMock(
+    mock_table.select.return_value.order.return_value.range.return_value.execute = AsyncMock(
         return_value=mock_result
     )
 
@@ -55,10 +55,11 @@ async def test_get_all_leads_returns_list_ordered_by_score(sample_lead_row):
     mock_client.table.return_value = mock_table
 
     repo = LeadRepository(client=mock_client)
-    leads = await repo.get_all_leads()
+    result = await repo.get_all_leads()
 
-    assert len(leads) == 1
-    assert leads[0]["company_name"] == "Acme Roofing Inc"
+    assert len(result["leads"]) == 1
+    assert result["leads"][0]["company_name"] == "Acme Roofing Inc"
+    assert result["total"] == 1
 
 
 @pytest.mark.asyncio
@@ -131,6 +132,34 @@ async def test_upsert_contractor_new_lead_with_gaf_id_gets_scraped_status():
     upsert_payload = mock_table.upsert.call_args[0][0]
     assert upsert_payload["status"] == "scraped"
     assert result["id"] == lead_id
+
+
+@pytest.mark.asyncio
+async def test_get_all_leads_returns_paginated_result(sample_lead_row):
+    """get_all_leads returns a dict with leads list, total, page, and limit."""
+    from app.repositories.lead_repository import LeadRepository
+
+    mock_result = MagicMock()
+    mock_result.data = [sample_lead_row]
+    mock_result.count = 42  # total across all pages
+
+    mock_table = MagicMock()
+    # .select().order().range().execute()
+    mock_table.select.return_value.order.return_value.range.return_value.execute = AsyncMock(
+        return_value=mock_result
+    )
+
+    mock_client = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    repo = LeadRepository(client=mock_client)
+    result = await repo.get_all_leads(page=1, limit=12)
+
+    assert result["total"] == 42
+    assert result["page"] == 1
+    assert result["limit"] == 12
+    assert len(result["leads"]) == 1
+    assert result["leads"][0]["company_name"] == "Acme Roofing Inc"
 
 
 @pytest.mark.asyncio
