@@ -23,7 +23,7 @@ page.evaluate call count to exactly 2 for empty pages and 3 for stable
 non-empty pages, matching the test mock's side_effect lists.
 """
 import logging
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Page
 
 from app.config import ScraperConfig
 from app.models.lead import ContractorRecord
@@ -128,9 +128,9 @@ class PlaywrightScraper:
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
-            page = browser.new_page()
-
+            page = None
             try:
+                page = browser.new_page()
                 page.goto(url, wait_until="networkidle", timeout=60_000)
                 page.wait_for_selector(_CARD_SELECTOR, timeout=30_000)
                 self._scroll_to_stable(page)
@@ -139,6 +139,8 @@ class PlaywrightScraper:
                 logger.exception("Playwright extraction failed for %s", url)
                 raw_contractors = []
             finally:
+                if page is not None:
+                    page.close()
                 browser.close()
 
         contractors = [
@@ -153,6 +155,12 @@ class PlaywrightScraper:
                 phone=c.get("phone"),
                 gaf_profile_url=c.get("gaf_profile_url"),
                 certifications=c.get("certifications") or [],
+                # not available in GAF directory listing; populated by enrichment
+                website=None,
+                rating=None,
+                review_count=None,
+                years_in_business=None,
+                service_area=None,
             )
             for c in (raw_contractors or [])
             if c.get("company_name")
@@ -164,7 +172,7 @@ class PlaywrightScraper:
         logger.info("PlaywrightScraper extracted %d contractors", len(contractors))
         return contractors
 
-    def _scroll_to_stable(self, page) -> None:
+    def _scroll_to_stable(self, page: Page) -> None:
         """Scroll down until the card count stops increasing.
 
         Uses page.mouse.wheel for scrolling so that page.evaluate is reserved
