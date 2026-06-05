@@ -62,41 +62,39 @@ async def test_get_all_leads_returns_list_ordered_by_score(sample_lead_row):
 
 
 @pytest.mark.asyncio
-async def test_upsert_contractor_preserves_enriched_status(sample_contractor):
-    """Re-running upsert on an already-enriched lead must not reset its status to 'scraped'."""
+@pytest.mark.parametrize("protected_status", ["enriched", "researched"])
+async def test_upsert_contractor_preserves_protected_status(sample_contractor, protected_status):
+    """Re-running upsert on a lead with 'enriched' or 'researched' status must not reset it to 'scraped'."""
     from app.repositories.lead_repository import LeadRepository
 
     lead_id = str(uuid4())
 
-    # First call: SELECT to check existing status — returns 'enriched'
     check_result = MagicMock()
-    check_result.data = [{"status": "enriched"}]
+    check_result.data = [{"status": protected_status}]
 
-    # Second call: upsert — returns the row
     upsert_result = MagicMock()
-    upsert_result.data = [{"id": lead_id, "status": "enriched"}]
+    upsert_result.data = [{"id": lead_id, "status": protected_status}]
 
     mock_table = MagicMock()
-    # SELECT chain: .select().eq().execute()
     mock_table.select.return_value.eq.return_value.execute = AsyncMock(return_value=check_result)
-    # UPSERT chain: .upsert().execute()
     mock_table.upsert.return_value.execute = AsyncMock(return_value=upsert_result)
 
     mock_client = MagicMock()
     mock_client.table.return_value = mock_table
 
-    # Give the contractor a gaf_contractor_id so the SELECT guard is triggered
-    sample_contractor_with_id = sample_contractor.model_copy(
-        update={"gaf_contractor_id": "gaf-123"}
+    # Use a contractor with a gaf_contractor_id so the SELECT guard fires
+    from app.models.lead import ContractorRecord
+    contractor = ContractorRecord(
+        company_name="Existing Co",
+        gaf_contractor_id="existing-gaf-456",
     )
 
     repo = LeadRepository(client=mock_client)
-    result = await repo.upsert_contractor(sample_contractor_with_id)
+    result = await repo.upsert_contractor(contractor)
 
-    # The status in the upserted row must not be 'scraped'
     upsert_payload = mock_table.upsert.call_args[0][0]
-    assert upsert_payload["status"] == "enriched"
-    assert result["status"] == "enriched"
+    assert upsert_payload["status"] == protected_status
+    assert result["status"] == protected_status
 
 
 @pytest.mark.asyncio
