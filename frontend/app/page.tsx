@@ -23,12 +23,21 @@ interface LeadsSectionProps {
 async function LeadsSection({ page, limit }: LeadsSectionProps) {
   let leads: Lead[] = [];
   let total = 0;
+  let fetchError = false;
   try {
     const result = await getCachedLeads(page, limit);
     leads = result.leads;
     total = result.total;
   } catch (err) {
     console.error('[LeadsSection] Failed to fetch leads:', err);
+    fetchError = true;
+  }
+  if (fetchError) {
+    return (
+      <p className="text-sm text-red-500 mt-4">
+        Unable to load leads. Make sure the backend is running on port 8000.
+      </p>
+    );
   }
   return <LeadsGridClient leads={leads} page={page} limit={limit} total={total} />;
 }

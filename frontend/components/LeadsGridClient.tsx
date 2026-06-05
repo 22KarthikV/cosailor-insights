@@ -113,7 +113,7 @@ interface StatsBarProps {
 function StatsBar({ total, enrichedCount, avgScore }: StatsBarProps): React.JSX.Element {
   return (
     <div className="flex flex-wrap gap-3">
-      <StatChip label="Total Leads" value={total} />
+      <StatChip label="This Page" value={total} />
       <StatChip label="Avg Score" value={avgScore} />
       <StatChip label="Enriched" value={`${enrichedCount} / ${total}`} />
     </div>
