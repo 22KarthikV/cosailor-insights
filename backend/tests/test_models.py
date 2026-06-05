@@ -77,3 +77,10 @@ def test_pipeline_run_request_scraper_defaults_to_playwright():
     from app.models.lead import PipelineRunRequest
     req = PipelineRunRequest()
     assert req.scraper == "playwright"
+
+
+def test_scraper_config_rejects_invalid_scraper():
+    from app.config import ScraperConfig
+    import pytest
+    with pytest.raises(ValueError, match="scraper must be"):
+        ScraperConfig(scraper="selenium")

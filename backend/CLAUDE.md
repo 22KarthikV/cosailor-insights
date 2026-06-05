@@ -11,6 +11,7 @@ class ScraperConfig:
     country_code: str = "us"
     distance: int = 25   # must be 25, 50, or 100
     limit: int | None = None   # cap for testing
+    scraper: Literal["firecrawl", "playwright"] = "playwright"
 ```
 
 ## Claude Model

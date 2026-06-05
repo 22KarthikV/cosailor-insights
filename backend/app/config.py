@@ -46,3 +46,5 @@ class ScraperConfig:
     def __post_init__(self):
         if self.distance not in (25, 50, 100):
             raise ValueError(f"distance must be 25, 50, or 100. Got: {self.distance}")
+        if self.scraper not in ("firecrawl", "playwright"):
+            raise ValueError(f"scraper must be 'firecrawl' or 'playwright'. Got: {self.scraper}")
