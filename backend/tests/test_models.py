@@ -59,3 +59,21 @@ def test_lead_response_new_fields_are_optional():
     assert resp.convertibility_score is None
     assert resp.distance_band is None
     assert resp.priority_index is None
+
+
+def test_scraper_config_defaults_to_playwright():
+    from app.config import ScraperConfig
+    cfg = ScraperConfig()
+    assert cfg.scraper == "playwright"
+
+
+def test_scraper_config_accepts_firecrawl():
+    from app.config import ScraperConfig
+    cfg = ScraperConfig(scraper="firecrawl")
+    assert cfg.scraper == "firecrawl"
+
+
+def test_pipeline_run_request_scraper_defaults_to_playwright():
+    from app.models.lead import PipelineRunRequest
+    req = PipelineRunRequest()
+    assert req.scraper == "playwright"

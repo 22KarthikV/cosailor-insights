@@ -6,6 +6,7 @@ structured object — never hardcoded at call sites.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dataclasses import dataclass
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -33,12 +34,14 @@ class ScraperConfig:
     distance must be one of the three values supported by the GAF URL schema
     (25 / 50 / 100 miles); anything else raises ValueError at construction time.
     limit is a test-only cap — set it to a small integer to avoid burning
-    Firecrawl credits during development.
+    API credits during development.
+    scraper selects which scraper implementation to use at pipeline start time.
     """
     postal_code: str = "10013"
     country_code: str = "us"
     distance: int = 25     # supported: 25, 50, or 100 miles
     limit: int | None = None  # cap for testing (e.g. 3)
+    scraper: Literal["firecrawl", "playwright"] = "playwright"
 
     def __post_init__(self):
         if self.distance not in (25, 50, 100):

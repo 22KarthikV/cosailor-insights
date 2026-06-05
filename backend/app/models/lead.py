@@ -8,7 +8,7 @@ PipelineRunResponse    — 202 response with run_id for status polling
 PipelineStatusResponse — payload for GET /api/pipeline/status/{run_id}
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -95,6 +95,7 @@ class PipelineRunRequest(BaseModel):
     country_code: str = "us"
     distance: int = 25
     limit: Optional[int] = None   # test-only cap on number of contractors scraped
+    scraper: Literal["firecrawl", "playwright"] = "playwright"
 
 
 class PipelineRunResponse(BaseModel):
