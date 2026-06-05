@@ -50,7 +50,7 @@ class PipelineService:
             )
 
             # Stage 1: Scrape contractors from the GAF directory
-            contractors = self._scraper.scrape_contractors(config)
+            contractors = await asyncio.to_thread(self._scraper.scrape_contractors, config)
             await self._repo.update_pipeline_progress(run_id, leads_scraped=len(contractors))
 
             lead_rows = [await self._repo.upsert_contractor(c) for c in contractors]
@@ -91,7 +91,8 @@ class PipelineService:
         async def enrich_one(row: dict, contractor, research: dict) -> bool:
             async with sem:
                 try:
-                    insight = self._enricher.enrich(
+                    insight = await asyncio.to_thread(
+                        self._enricher.enrich,
                         contractor,
                         research,
                         search_postal_code=search_postal_code,
