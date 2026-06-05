@@ -18,9 +18,21 @@ class LeadRepository:
     async def upsert_contractor(self, contractor: ContractorRecord) -> dict:
         """Insert or update a contractor row, keyed on gaf_contractor_id.
 
-        Falls back to a plain insert when gaf_contractor_id is None, which is
-        acceptable for contractors whose GAF profile URL is not parseable.
+        Preserves the existing status for leads already in 'researched' or 'enriched'
+        state so that re-running the pipeline does not reset enriched leads to 'scraped'.
+        Falls back to a plain insert when gaf_contractor_id is None.
         """
+        preserved_status: str | None = None
+        if contractor.gaf_contractor_id:
+            check = (
+                await self._client.table("leads")
+                .select("status")
+                .eq("gaf_contractor_id", contractor.gaf_contractor_id)
+                .execute()
+            )
+            if check.data and check.data[0]["status"] in ("researched", "enriched"):
+                preserved_status = check.data[0]["status"]
+
         row = {
             "company_name": contractor.company_name,
             "gaf_contractor_id": contractor.gaf_contractor_id,
@@ -37,7 +49,7 @@ class LeadRepository:
             "service_area": contractor.service_area,
             "rating": float(contractor.rating) if contractor.rating else None,
             "review_count": contractor.review_count,
-            "status": "scraped",
+            "status": preserved_status or "scraped",
         }
         result = (
             await self._client.table("leads")
