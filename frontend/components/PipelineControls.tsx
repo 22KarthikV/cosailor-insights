@@ -1,28 +1,25 @@
 'use client';
 
 /**
- * PipelineControls — form for triggering a pipeline run and tracking its progress.
+ * PipelineControls — form for triggering a pipeline run and tracking progress.
  *
- * This is the only component on the dashboard that polls the backend. After a
- * run is started it polls GET /api/pipeline/status/:run_id every 3 seconds until
- * the status reaches 'completed' or 'failed', then calls router.refresh() so the
- * Server Component re-fetches the updated leads list.
- *
- * ZIP code validation uses a regex rather than a library to keep the bundle small;
- * only US 5-digit and ZIP+4 formats are accepted because GAF operates in the US.
+ * Polls GET /api/pipeline/status/:run_id every 3 seconds while a run is active.
+ * On every successful poll, calls revalidateLeads() (server action) then
+ * router.refresh() so the Server Component re-fetches fresh leads from the DB.
+ * This means partial cards appear as soon as scraping writes leads to the DB,
+ * and score badges fill in progressively as each enrichment completes.
  */
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { triggerPipeline, getPipelineStatus } from '@/lib/api';
+import { revalidateLeads } from '@/app/actions';
 import type { PipelineStatusResponse } from '@/lib/types';
 
-/** Values the user can select for the search radius. Must match the backend's allowed distances. */
 const DISTANCE_OPTIONS = [25, 50, 100] as const;
 type DistanceOption = (typeof DISTANCE_OPTIONS)[number];
 
 const DEFAULT_COUNTRY_CODE = 'us' as const;
-/** Accepts standard 5-digit ZIPs and ZIP+4 (e.g. 10013-1234). */
 const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
 
 export function PipelineControls(): React.JSX.Element {
@@ -38,12 +35,13 @@ export function PipelineControls(): React.JSX.Element {
   const isValidPostalCode = US_ZIP_REGEX.test(postalCode.trim());
   const isSubmitDisabled = loading || isRunning || postalCode.trim() === '' || !isValidPostalCode;
 
-  /** Trigger a new pipeline run and optimistically set status to 'running'. */
   const handleRun = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await triggerPipeline(postalCode.trim(), DEFAULT_COUNTRY_CODE, distance);
+      // Bust cache so the first refresh after scraping shows fresh data
+      await revalidateLeads();
+      const data = await triggerPipeline(postalCode.trim(), DEFAULT_COUNTRY_CODE, distance, 'playwright');
       setRunId(data.run_id);
       setPipeStatus({
         run_id: data.run_id,
@@ -62,33 +60,36 @@ export function PipelineControls(): React.JSX.Element {
   };
 
   /**
-   * Poll the pipeline status every 3 seconds while a run is active.
-   * Clears the interval and triggers a server-side refresh when the run finishes.
+   * Poll every 3 seconds while a run is active.
+   * Each tick: revalidate cache, then refresh the Server Component so
+   * partial cards appear progressively as leads are scraped and enriched.
    */
   useEffect(() => {
     if (!runId || !isRunning) return;
+
     const interval = setInterval(async () => {
       try {
         const status = await getPipelineStatus(runId);
         setPipeStatus(status);
+        // Always revalidate + refresh — shows partial cards during scraping
+        // and progressively filled cards during enrichment.
+        await revalidateLeads();
+        router.refresh();
         if (status.status === 'completed' || status.status === 'failed') {
           clearInterval(interval);
-          router.refresh();
         }
       } catch {
         /* keep polling — transient network errors should not cancel the interval */
       }
     }, 3000);
+
     return () => clearInterval(interval);
   }, [runId, isRunning, router]);
 
   return (
     <div className="flex items-center gap-4 flex-wrap">
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="pipeline-postal-code"
-          className="text-xs font-medium text-gray-600"
-        >
+        <label htmlFor="pipeline-postal-code" className="text-xs font-medium text-gray-600">
           ZIP Code
         </label>
         <input
@@ -106,10 +107,7 @@ export function PipelineControls(): React.JSX.Element {
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="pipeline-distance"
-          className="text-xs font-medium text-gray-600"
-        >
+        <label htmlFor="pipeline-distance" className="text-xs font-medium text-gray-600">
           Distance
         </label>
         <select
@@ -127,10 +125,6 @@ export function PipelineControls(): React.JSX.Element {
         </select>
       </div>
 
-      {/*
-        Invisible spacer label keeps the button vertically aligned with the
-        labelled inputs above it without any absolute positioning.
-      */}
       <div className="flex flex-col justify-end gap-1">
         <span className="text-xs font-medium text-transparent select-none" aria-hidden="true">
           &nbsp;
@@ -151,7 +145,6 @@ export function PipelineControls(): React.JSX.Element {
         </Button>
       </div>
 
-      {/* Live progress display shown while a run is active or after it finishes */}
       {pipeStatus && (
         <div className="text-sm">
           {pipeStatus.status === 'running' && (
