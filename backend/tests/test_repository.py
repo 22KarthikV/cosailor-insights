@@ -1,3 +1,9 @@
+"""Tests for LeadRepository (repositories/lead_repository.py).
+
+Uses MagicMock to simulate the Supabase async client without hitting the
+database. The Supabase query builder is entirely synchronous until .execute()
+which returns a coroutine — the mocks reflect this pattern.
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -5,13 +11,14 @@ from uuid import uuid4
 
 @pytest.mark.asyncio
 async def test_upsert_contractor_returns_row_with_id(sample_contractor):
+    """upsert_contractor returns the newly created or updated row dict."""
     from app.repositories.lead_repository import LeadRepository
 
     new_id = str(uuid4())
     mock_result = MagicMock()
     mock_result.data = [{"id": new_id, "company_name": "Acme Roofing Inc"}]
 
-    # supabase query chain is SYNCHRONOUS until .execute() which is async
+    # Supabase query chain is SYNCHRONOUS until .execute() which is async
     mock_table = MagicMock()
     mock_table.upsert.return_value.execute = AsyncMock(return_value=mock_result)
 
@@ -27,6 +34,7 @@ async def test_upsert_contractor_returns_row_with_id(sample_contractor):
 
 @pytest.mark.asyncio
 async def test_get_all_leads_returns_list_ordered_by_score(sample_lead_row):
+    """get_all_leads returns the list from Supabase as-is."""
     from app.repositories.lead_repository import LeadRepository
 
     mock_result = MagicMock()
@@ -50,6 +58,7 @@ async def test_get_all_leads_returns_list_ordered_by_score(sample_lead_row):
 
 @pytest.mark.asyncio
 async def test_update_enrichment_sets_status_to_enriched():
+    """update_enrichment writes all LeadInsight fields and sets status='enriched'."""
     from app.models.lead import LeadInsight
     from app.repositories.lead_repository import LeadRepository
 

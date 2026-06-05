@@ -1,3 +1,16 @@
+"""Claude AI lead enrichment service.
+
+LeadEnricher orchestrates the following for each contractor:
+  1. Compute deterministic scoring baselines via ScoringService.
+  2. Call claude-haiku-4-5 with a structured prompt containing GAF data,
+     Perplexity research, and the pre-computed baselines.
+  3. Parse and clamp the returned JSON to within ±1 of each Python baseline.
+  4. Assemble and return a LeadInsight ready for database persistence.
+
+The scoring baselines act as an anchor: Claude may adjust each score by at
+most ±1 based on research context, keeping outputs deterministic and auditable
+regardless of LLM temperature drift.
+"""
 import asyncio
 import json
 import re
@@ -5,6 +18,9 @@ from anthropic import Anthropic
 from app.models.lead import ContractorRecord, LeadInsight
 from app.services.scorer import ScoringService, compute_priority_index
 
+# System prompt instructs Claude to return a single JSON object with no
+# markdown wrapping. Strict format required because _parse() only does one
+# level of fence-stripping before raising.
 _SYSTEM = """You are a sales intelligence analyst for a roofing materials distributor.
 Score and analyze roofing contractor leads for sales rep prioritization.
 
@@ -21,10 +37,16 @@ Required keys:
 
 
 def _fmt(detected: bool) -> str:
+    """Convert a boolean signal flag to a human-readable label for the Claude prompt."""
     return "DETECTED" if detected else "NOT FOUND"
 
 
 def _prompt(c: ContractorRecord, research: dict, lead_comps, conv_comps) -> str:
+    """Build the user turn sent to Claude with contractor data, research, and baselines.
+
+    Baselines are embedded in the prompt so Claude can see the Python-computed
+    anchor values before producing its response, enabling the ±1 adjustment rule.
+    """
     certs = ", ".join(c.certifications) if c.certifications else "none"
     lead_int = round(lead_comps.baseline)
     conv_int  = round(conv_comps.baseline)
@@ -65,6 +87,8 @@ Talking points must reference this specific contractor's certifications, locatio
 
 
 class LeadEnricher:
+    """Enriches a contractor record with Claude AI scoring and sales intelligence."""
+
     def __init__(self, api_key: str):
         self._client = Anthropic(api_key=api_key)
         self._scorer = ScoringService()
@@ -75,6 +99,11 @@ class LeadEnricher:
         research: dict,
         search_postal_code: str = "",
     ) -> LeadInsight:
+        """Run the full enrichment flow synchronously and return a LeadInsight.
+
+        Computes baselines first, calls Claude, then clamps the returned scores
+        to ±1 of their respective Python baselines as a safety net against drift.
+        """
         lead_comps    = self._scorer.compute_lead_baseline(contractor)
         conv_comps    = self._scorer.compute_convertibility_baseline(
             research.get("summary")
@@ -96,7 +125,7 @@ class LeadEnricher:
         raw  = message.content[0].text.strip()
         data = self._parse(raw)
 
-        # Clamp each score within ±1 of its Python baseline
+        # Clamp each score within ±1 of its Python baseline to prevent LLM drift
         lead_int = round(lead_comps.baseline)
         conv_int = round(conv_comps.baseline)
         data["lead_score"] = max(
@@ -123,6 +152,11 @@ class LeadEnricher:
         research: dict,
         search_postal_code: str = "",
     ) -> LeadInsight:
+        """Async wrapper around enrich() for use in async pipeline contexts.
+
+        The Anthropic SDK client is synchronous, so this offloads the call to a
+        thread pool executor to avoid blocking the event loop.
+        """
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, self.enrich, contractor, research, search_postal_code
@@ -130,6 +164,11 @@ class LeadEnricher:
 
     @staticmethod
     def _parse(raw: str) -> dict:
+        """Parse Claude's JSON response, stripping markdown fences if present.
+
+        Claude occasionally wraps JSON in ```json``` blocks despite instructions
+        not to. This method handles both clean and fenced responses before raising.
+        """
         try:
             return json.loads(raw)
         except json.JSONDecodeError:

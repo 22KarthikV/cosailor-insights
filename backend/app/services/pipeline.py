@@ -1,3 +1,16 @@
+"""Orchestrates the three-stage scrape → research → enrich pipeline.
+
+PipelineService.execute() runs as a FastAPI BackgroundTask so the HTTP
+response is returned before the long-running work finishes.
+
+Stage 1 — Scrape:    fetch contractor listings from the GAF directory via Firecrawl.
+Stage 2 — Research:  concurrently query Perplexity for web intelligence on each contractor.
+Stage 3 — Enrich:    call Claude AI to produce scored LeadInsight objects.
+
+Individual enrichment failures are isolated per-lead: one bad contractor does not
+abort the rest of the batch. The pipeline_runs row is updated in Supabase after
+each stage so the frontend can display live progress.
+"""
 import logging
 
 from app.config import ScraperConfig
@@ -11,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineService:
+    """Coordinates the end-to-end lead enrichment pipeline."""
+
     def __init__(
         self,
         repo: LeadRepository,
@@ -24,6 +39,12 @@ class PipelineService:
         self._enricher = enricher
 
     async def execute(self, run_id: str, request: PipelineRunRequest) -> None:
+        """Run all three pipeline stages for a single scrape request.
+
+        Marks the pipeline run as failed in the database if any unrecoverable
+        error occurs before enrichment finishes, then re-raises so the
+        BackgroundTask framework can log the full traceback.
+        """
         try:
             config = ScraperConfig(
                 postal_code=request.postal_code,
@@ -32,20 +53,20 @@ class PipelineService:
                 limit=request.limit,
             )
 
-            # Stage 1: Scrape
+            # Stage 1: Scrape contractors from the GAF directory
             contractors = self._scraper.scrape_contractors(config)
             await self._repo.update_pipeline_progress(run_id, leads_scraped=len(contractors))
 
             lead_rows = [await self._repo.upsert_contractor(c) for c in contractors]
 
-            # Stage 2: Research (concurrent)
+            # Stage 2: Research all contractors concurrently via Perplexity
             research_results = await self._researcher.research_all(contractors)
             for row, research in zip(lead_rows, research_results):
                 await self._repo.update_research(
                     row["id"], research.get("summary", ""), research.get("sources", [])
                 )
 
-            # Stage 3: Enrich with Claude + ScoringService
+            # Stage 3: Enrich each lead with Claude AI scoring; failures are isolated per-lead
             enriched = 0
             for row, contractor, research in zip(lead_rows, contractors, research_results):
                 try:

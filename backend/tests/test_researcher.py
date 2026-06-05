@@ -1,3 +1,9 @@
+"""Tests for ContractorResearcher (services/researcher.py).
+
+Verifies that the Perplexity API response is correctly parsed into a
+{summary, sources} dict, and that API errors return an empty result
+without raising so the pipeline can continue with the next contractor.
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +15,7 @@ MOCK_PERPLEXITY_RESPONSE = {
 
 @pytest.mark.asyncio
 async def test_researcher_returns_summary_and_sources(sample_contractor):
+    """A successful Perplexity response is mapped to summary and sources keys."""
     from app.services.researcher import ContractorResearcher
 
     mock_response = MagicMock()
@@ -33,6 +40,7 @@ async def test_researcher_returns_summary_and_sources(sample_contractor):
 
 @pytest.mark.asyncio
 async def test_researcher_returns_empty_dict_on_api_error(sample_contractor):
+    """Any exception from the Perplexity API is caught and returns an empty result dict."""
     from app.services.researcher import ContractorResearcher
 
     mock_client = AsyncMock()

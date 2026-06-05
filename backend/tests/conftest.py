@@ -1,3 +1,9 @@
+"""Shared pytest fixtures for the Cosailor Insights test suite.
+
+Provides a realistic ContractorRecord (sample_contractor), a complete
+enriched lead DB row (sample_lead_row), and five pgeocode mock fixtures
+that simulate different distance scenarios without hitting the internet.
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -7,6 +13,7 @@ from unittest.mock import patch
 
 @pytest.fixture
 def sample_contractor():
+    """A fully-populated ContractorRecord representing a Master Elite contractor in NYC."""
     from app.models.lead import ContractorRecord
     return ContractorRecord(
         company_name="Acme Roofing Inc",
@@ -24,6 +31,7 @@ def sample_contractor():
 
 @pytest.fixture
 def sample_lead_row():
+    """A complete enriched lead row as returned by the Supabase leads table."""
     return {
         "id": str(uuid4()),
         "company_name": "Acme Roofing Inc",
@@ -115,12 +123,12 @@ def mock_pgeocode_far():
 
 @pytest.fixture
 def mock_pgeocode_invalid():
-    """Postal code lookup returns NaN — should fall back gracefully."""
+    """Postal code lookup returns NaN — should fall back gracefully to 'near' band."""
     import math
     with patch("app.services.scorer.pgeocode") as mock_pg:
         nomi = MagicMock()
         nomi.query_postal_code.side_effect = [
-            _make_postal_result(math.nan, math.nan),  # invalid
+            _make_postal_result(math.nan, math.nan),  # invalid / unrecognised ZIP
             _make_postal_result(40.7128, -74.0060),
         ]
         mock_pg.Nominatim.return_value = nomi

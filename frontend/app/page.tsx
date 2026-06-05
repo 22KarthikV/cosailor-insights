@@ -1,3 +1,13 @@
+/**
+ * Dashboard page — the application's home route ("/").
+ *
+ * This is an async Server Component. It renders a header with score-tier
+ * legend and PipelineControls, then lazily streams the leads grid via Suspense.
+ *
+ * LeadsSection fetches leads server-side on each request (cache: 'no-store').
+ * A failed fetch is caught and swallowed so the page renders an empty grid
+ * rather than crashing when the backend is not running.
+ */
 import { Suspense } from 'react';
 import { LeadsGridClient } from '@/components/LeadsGridClient';
 import { PipelineControls } from '@/components/PipelineControls';
@@ -5,13 +15,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getLeads } from '@/lib/api';
 import type { Lead } from '@/lib/types';
 
+/** Async sub-component that fetches leads and passes them to the client grid. */
 async function LeadsSection() {
   let leads: Lead[] = [];
   try {
     leads = await getLeads();
   } catch (err) {
     console.error('[LeadsSection] Failed to fetch leads:', err);
-    /* backend not running or returned an error */
+    /* backend not running or returned an error — render empty state */
   }
   return <LeadsGridClient leads={leads} />;
 }
@@ -29,6 +40,8 @@ export default function DashboardPage() {
           </div>
           <PipelineControls />
         </div>
+
+        {/* Score-tier legend: maps colour coding to lead_score ranges */}
         <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
           <span className="flex items-center gap-1">
             <span className="w-3 h-3 rounded-full bg-green-400 inline-block" />
@@ -45,6 +58,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Skeleton grid shown while LeadsSection is streaming */}
       <Suspense
         fallback={
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

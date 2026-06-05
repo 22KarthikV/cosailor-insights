@@ -1,3 +1,16 @@
+/**
+ * ScoreBadge — displays a lead_score or convertibility_score as a colour-coded pill.
+ *
+ * Colour tiers follow the project's score legend:
+ *   8–10 → green (high priority)
+ *   5–7  → yellow (medium)
+ *   1–4  → red (low)
+ *
+ * When score is null the badge renders a grey "Pending" label (lead not yet enriched).
+ * The `size` prop switches between a compact card badge ("sm") and a large detail-page
+ * badge ("lg") that shows the raw number without the "/10" suffix.
+ */
+
 interface ScoreBadgeProps {
   score: number | null;
   size?: 'sm' | 'lg';
@@ -11,6 +24,7 @@ export function ScoreBadge({ score, size = 'sm' }: ScoreBadgeProps) {
       </span>
     );
   }
+
   const color =
     score >= 8
       ? 'bg-green-100 text-green-800 border border-green-200'
@@ -23,6 +37,7 @@ export function ScoreBadge({ score, size = 'sm' }: ScoreBadgeProps) {
 
   return (
     <span className={`inline-flex items-center rounded-full whitespace-nowrap ${color} ${sizeClass}`}>
+      {/* Large variant shows the raw number; small variant appends the "/10" scale */}
       {size === 'lg' ? score : `${score}/10`}
     </span>
   );

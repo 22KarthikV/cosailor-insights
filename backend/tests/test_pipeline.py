@@ -1,3 +1,9 @@
+"""Tests for PipelineService (services/pipeline.py).
+
+Verifies the three-stage orchestration flow: correct delegation to scraper,
+researcher, and enricher; per-lead failure isolation; and accurate completion
+counts written back to the pipeline_runs table.
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -5,6 +11,7 @@ from uuid import uuid4
 
 @pytest.fixture
 def _insight():
+    """A valid LeadInsight used as the enricher's return value in pipeline tests."""
     from app.models.lead import LeadInsight
     return LeadInsight(
         lead_score=9,
@@ -22,6 +29,7 @@ def _insight():
 
 @pytest.mark.asyncio
 async def test_pipeline_execute_stores_all_enriched_leads(sample_contractor, sample_lead_row, _insight):
+    """A single-contractor run calls all three stages and marks the run as completed."""
     from app.services.pipeline import PipelineService
 
     run_id = str(uuid4())
@@ -67,6 +75,7 @@ async def test_pipeline_execute_stores_all_enriched_leads(sample_contractor, sam
 
 @pytest.mark.asyncio
 async def test_pipeline_enriches_multiple_leads(sample_contractor, sample_lead_row, _insight):
+    """A three-contractor run calls enrich() and update_enrichment() exactly three times."""
     from app.services.pipeline import PipelineService
 
     mock_repo = AsyncMock()
@@ -105,6 +114,8 @@ async def test_pipeline_enriches_multiple_leads(sample_contractor, sample_lead_r
 
 @pytest.mark.asyncio
 async def test_pipeline_continues_when_one_enrichment_fails(sample_contractor, sample_lead_row, _insight):
+    """A per-lead enrichment failure is isolated: the failed lead is marked failed,
+    the remaining lead is enriched, and the run completes with leads_enriched=1."""
     from app.services.pipeline import PipelineService
 
     mock_repo = AsyncMock()

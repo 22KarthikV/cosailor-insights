@@ -1,5 +1,17 @@
 'use client';
 
+/**
+ * LeadsGridClient — interactive leads grid with filtering, sorting, and real-time updates.
+ *
+ * This is the only client component on the dashboard. It receives an initial
+ * leads array from the Server Component (LeadsSection in page.tsx) and keeps
+ * it live via useLeadsRealtime (Supabase Postgres change subscriptions).
+ *
+ * Sub-components are extracted to keep the root component under 50 lines:
+ *   StatChip          — single statistic tile
+ *   StatsBar          — row of StatChips (total, avg score, enriched count)
+ *   LeadFilterControls — score-tier filter buttons and sort selector
+ */
 import React, { useState, useMemo } from 'react';
 import { LeadCard } from './LeadCard';
 import type { Lead } from '@/lib/types';
@@ -17,15 +29,17 @@ interface StatChipProps {
   value: string | number;
 }
 
+/** A single labelled statistic tile shown in the stats bar. */
 function StatChip({ label, value }: StatChipProps) {
   return (
-    <div className="rounded-lg border bg-gray-50 px-4 py-2 flex flex-col gap-0.5 min-w-[100px]">
+    <div className="rounded-lg border bg-gray-50 px-4 py-2 flex flex-col gap-0.5 min-w-25">
       <span className="text-xs text-gray-500">{label}</span>
       <span className="text-lg font-bold text-gray-900 leading-tight">{value}</span>
     </div>
   );
 }
 
+/** Derive summary statistics from the current leads array. */
 function computeStats(leads: Lead[]) {
   const total = leads.length;
   const enrichedLeads = leads.filter((l) => l.status === 'enriched');
@@ -39,6 +53,7 @@ function computeStats(leads: Lead[]) {
   return { total, enrichedCount, avgScore };
 }
 
+/** Filter leads by score tier. Leads without a score are excluded from tier-specific filters. */
 function filterLeads(leads: Lead[], filter: ScoreFilter): Lead[] {
   if (filter === 'all') return leads;
   return leads.filter((l) => {
@@ -50,9 +65,11 @@ function filterLeads(leads: Lead[], filter: ScoreFilter): Lead[] {
   });
 }
 
+/** Sort leads without mutating the input array. */
 function sortLeads(leads: Lead[], sort: SortOption): Lead[] {
   return [...leads].sort((a, b) => {
     if (sort === 'score_desc') {
+      // Leads with no score sort to the bottom
       const aScore = a.lead_score ?? -1;
       const bScore = b.lead_score ?? -1;
       return bScore - aScore;
@@ -61,6 +78,7 @@ function sortLeads(leads: Lead[], sort: SortOption): Lead[] {
       return a.company_name.localeCompare(b.company_name);
     }
     if (sort === 'recently_enriched') {
+      // Unenriched leads (enriched_at = null) sort to the bottom
       const aTime = a.enriched_at ? new Date(a.enriched_at).getTime() : 0;
       const bTime = b.enriched_at ? new Date(b.enriched_at).getTime() : 0;
       return bTime - aTime;
@@ -115,6 +133,7 @@ function LeadFilterControls({
 }: LeadFilterControlsProps): React.JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-3">
+      {/* Segmented score-tier filter */}
       <div
         className="flex items-center gap-0 rounded border border-gray-200 overflow-hidden"
         role="group"
@@ -151,6 +170,7 @@ function LeadFilterControls({
         ))}
       </select>
 
+      {/* Result count only shown when a filter is active */}
       {scoreFilter !== 'all' && (
         <span className="text-xs text-gray-400">
           {resultCount} result{resultCount !== 1 ? 's' : ''}
@@ -161,6 +181,7 @@ function LeadFilterControls({
 }
 
 export function LeadsGridClient({ leads: initialLeads }: LeadsGridClientProps): React.JSX.Element {
+  // Merge real-time Supabase updates on top of the server-fetched initial state
   const leads = useLeadsRealtime(initialLeads)
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [sortOption, setSortOption] = useState<SortOption>('score_desc');

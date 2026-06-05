@@ -1,3 +1,14 @@
+"""GAF contractor directory scraper powered by Firecrawl.
+
+GafScraper fetches the GAF commercial contractor search page for a given
+postal code / country / distance combination and extracts structured contractor
+data using Firecrawl's JSON extraction mode.
+
+The URL format is defined once at module level (GAF_COMMERCIAL_URL) and
+parameterised at call time — values are never hardcoded in the scrape call.
+_ContractorSchema drives Firecrawl's LLM-extraction schema so that the model
+knows which fields to populate and in what format.
+"""
 from pydantic import BaseModel, Field
 from typing import Optional
 from firecrawl import FirecrawlApp, JsonConfig
@@ -5,6 +16,8 @@ from firecrawl import FirecrawlApp, JsonConfig
 from app.config import ScraperConfig
 from app.models.lead import ContractorRecord
 
+# Parameterised URL template — postal_code, country_code, and distance are
+# always substituted at call time; see ScraperConfig for allowed distance values.
 GAF_COMMERCIAL_URL = (
     "https://www.gaf.com/en-us/roofing-contractors/commercial"
     "?postalCode={postal_code}&countryCode={country_code}&distance={distance}"
@@ -12,6 +25,10 @@ GAF_COMMERCIAL_URL = (
 
 
 class _ContractorSchema(BaseModel):
+    """JSON extraction schema passed to Firecrawl for structured contractor parsing.
+
+    Field descriptions are forwarded to the Firecrawl LLM as extraction hints.
+    """
     company_name: str = Field(..., description="Full trading name of the roofing contractor")
     address: Optional[str] = Field(None, description="Street address")
     city: Optional[str] = Field(None, description="City")
@@ -35,16 +52,25 @@ class _ContractorSchema(BaseModel):
 
 
 class _GAFContractorList(BaseModel):
+    """Top-level extraction schema wrapping the list of contractors on the page."""
     contractors: list[_ContractorSchema] = Field(
         ..., description="All roofing contractors listed on this page"
     )
 
 
 class GafScraper:
+    """Scrapes GAF contractor listings using Firecrawl's JSON extraction mode."""
+
     def __init__(self, api_key: str):
         self._app = FirecrawlApp(api_key=api_key)
 
     def scrape_contractors(self, config: ScraperConfig) -> list[ContractorRecord]:
+        """Scrape contractors for the given postal code / distance configuration.
+
+        Returns an empty list when Firecrawl returns no JSON data (e.g. zero results
+        for the search area or a transient extraction failure).
+        Applies config.limit as a slice after mapping, never before the API call.
+        """
         url = GAF_COMMERCIAL_URL.format(
             postal_code=config.postal_code,
             country_code=config.country_code,
@@ -85,7 +111,7 @@ class GafScraper:
                 service_area=c.get("service_area"),
             )
             for c in raw_contractors
-            if c.get("company_name")
+            if c.get("company_name")  # skip rows with no company name
         ]
 
         if config.limit is not None:

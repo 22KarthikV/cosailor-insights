@@ -1,3 +1,13 @@
+/**
+ * Lead detail page — rendered at /leads/:id.
+ *
+ * Fetches a single lead server-side and renders a full-page breakdown
+ * including dual score badges (lead + convertibility), opportunity signals,
+ * AI sales summary, talking points, recommended approach, and raw research.
+ *
+ * Calls notFound() when the backend returns a non-2xx response, letting
+ * Next.js serve its built-in 404 page.
+ */
 import { getLead } from '@/lib/api';
 import { ScoreBadge } from '@/components/ScoreBadge';
 import { Badge } from '@/components/ui/badge';
@@ -50,7 +60,7 @@ export default async function LeadDetailPage({ params }: Props) {
           )}
         </div>
 
-        {/* Dual score column */}
+        {/* Dual score column: lead score and convertibility score side by side */}
         <div className="flex flex-row items-start gap-6 shrink-0">
           {/* Lead Score */}
           <div className="flex flex-col items-center gap-1">
@@ -79,7 +89,7 @@ export default async function LeadDetailPage({ params }: Props) {
               </div>
             )}
             {lead.score_rationale && (
-              <p className="text-xs text-gray-400 italic text-center max-w-[7rem] leading-snug">
+              <p className="text-xs text-gray-400 italic text-center max-w-28 leading-snug">
                 {lead.score_rationale}
               </p>
             )}
@@ -111,7 +121,7 @@ export default async function LeadDetailPage({ params }: Props) {
                 </div>
               </div>
               {lead.convertibility_rationale && (
-                <p className="text-xs text-gray-400 italic text-center max-w-[7rem] leading-snug">
+                <p className="text-xs text-gray-400 italic text-center max-w-28 leading-snug">
                   {lead.convertibility_rationale}
                 </p>
               )}
@@ -137,7 +147,7 @@ export default async function LeadDetailPage({ params }: Props) {
       )}
 
       <div className="space-y-4">
-        {/* Opportunity Signals — distance + priority index */}
+        {/* Opportunity Signals — distance band + composite priority index */}
         {(lead.distance_band !== null || lead.priority_index !== null) && (
           <Card>
             <CardHeader>
@@ -168,7 +178,7 @@ export default async function LeadDetailPage({ params }: Props) {
           </Card>
         )}
 
-        {/* Sales Summary */}
+        {/* AI Sales Summary — Claude-generated 2–3 sentence overview */}
         {lead.ai_summary && (
           <Card>
             <CardHeader>
@@ -182,7 +192,7 @@ export default async function LeadDetailPage({ params }: Props) {
           </Card>
         )}
 
-        {/* Talking Points */}
+        {/* Talking Points — up to 3 contractor-specific sales hooks */}
         {lead.talking_points.length > 0 && (
           <Card>
             <CardHeader>
@@ -201,7 +211,7 @@ export default async function LeadDetailPage({ params }: Props) {
           </Card>
         )}
 
-        {/* Recommended Approach */}
+        {/* Recommended Approach — Claude's suggested outreach strategy */}
         {lead.recommended_approach && (
           <Card>
             <CardHeader>
@@ -215,7 +225,7 @@ export default async function LeadDetailPage({ params }: Props) {
           </Card>
         )}
 
-        {/* Web Research (Perplexity) */}
+        {/* Web Research — raw Perplexity summary stored in Stage 2 */}
         {lead.research_summary && (
           <Card>
             <CardHeader>

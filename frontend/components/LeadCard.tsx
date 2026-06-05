@@ -1,3 +1,10 @@
+/**
+ * LeadCard — compact card shown in the dashboard grid for a single lead.
+ *
+ * Renders company name, location, top two certifications (with overflow count),
+ * AI summary excerpt, star rating, and enrichment status. Clicking the card
+ * navigates to the full lead detail page (/leads/:id).
+ */
 import Link from 'next/link';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +13,7 @@ import type { Lead } from '@/lib/types';
 
 export function LeadCard({ lead }: { lead: Lead }) {
   const location = [lead.city, lead.state].filter(Boolean).join(', ');
+
   return (
     <Link href={`/leads/${lead.id}`} className="block group h-full">
       <Card className="h-full transition-shadow hover:shadow-md border-gray-200 group-hover:border-blue-300">
@@ -22,11 +30,13 @@ export function LeadCard({ lead }: { lead: Lead }) {
             </div>
           </div>
         </CardHeader>
+
         <CardContent className="pt-0 space-y-3">
           {lead.certifications.length > 0 && (
             <div className="flex flex-wrap gap-1">
+              {/* Show at most 2 certification badges; overflow shown as "+N" */}
               {lead.certifications.slice(0, 2).map((cert) => (
-                <Badge key={cert} variant="secondary" className="text-xs max-w-[200px] truncate" title={cert}>
+                <Badge key={cert} variant="secondary" className="text-xs max-w-50 truncate" title={cert}>
                   {cert}
                 </Badge>
               ))}
@@ -37,9 +47,11 @@ export function LeadCard({ lead }: { lead: Lead }) {
               )}
             </div>
           )}
+
           {lead.ai_summary && (
             <p className="text-xs text-gray-600 leading-relaxed line-clamp-3">{lead.ai_summary}</p>
           )}
+
           {lead.rating !== null && (
             <div className="flex items-center gap-1 text-xs text-gray-500">
               <span className="text-yellow-500">★</span>
@@ -47,6 +59,7 @@ export function LeadCard({ lead }: { lead: Lead }) {
               {lead.review_count !== null && <span>({lead.review_count} reviews)</span>}
             </div>
           )}
+
           {lead.status === 'failed' && (
             <p className="text-xs text-red-500">⚠ Enrichment failed</p>
           )}

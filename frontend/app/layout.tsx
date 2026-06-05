@@ -1,3 +1,9 @@
+/**
+ * Root layout for the Cosailor Insights Next.js application.
+ *
+ * Wraps every page with the Inter font, a light grey background, and the
+ * global CSS reset. Metadata is defined here so it applies to all routes.
+ */
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';

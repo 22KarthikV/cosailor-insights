@@ -1,15 +1,28 @@
 'use client';
 
+/**
+ * PipelineControls — form for triggering a pipeline run and tracking its progress.
+ *
+ * This is the only component on the dashboard that polls the backend. After a
+ * run is started it polls GET /api/pipeline/status/:run_id every 3 seconds until
+ * the status reaches 'completed' or 'failed', then calls router.refresh() so the
+ * Server Component re-fetches the updated leads list.
+ *
+ * ZIP code validation uses a regex rather than a library to keep the bundle small;
+ * only US 5-digit and ZIP+4 formats are accepted because GAF operates in the US.
+ */
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { triggerPipeline, getPipelineStatus } from '@/lib/api';
 import type { PipelineStatusResponse } from '@/lib/types';
 
+/** Values the user can select for the search radius. Must match the backend's allowed distances. */
 const DISTANCE_OPTIONS = [25, 50, 100] as const;
 type DistanceOption = (typeof DISTANCE_OPTIONS)[number];
 
 const DEFAULT_COUNTRY_CODE = 'us' as const;
+/** Accepts standard 5-digit ZIPs and ZIP+4 (e.g. 10013-1234). */
 const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
 
 export function PipelineControls(): React.JSX.Element {
@@ -25,6 +38,7 @@ export function PipelineControls(): React.JSX.Element {
   const isValidPostalCode = US_ZIP_REGEX.test(postalCode.trim());
   const isSubmitDisabled = loading || isRunning || postalCode.trim() === '' || !isValidPostalCode;
 
+  /** Trigger a new pipeline run and optimistically set status to 'running'. */
   const handleRun = async () => {
     setLoading(true);
     setError(null);
@@ -47,6 +61,10 @@ export function PipelineControls(): React.JSX.Element {
     }
   };
 
+  /**
+   * Poll the pipeline status every 3 seconds while a run is active.
+   * Clears the interval and triggers a server-side refresh when the run finishes.
+   */
   useEffect(() => {
     if (!runId || !isRunning) return;
     const interval = setInterval(async () => {
@@ -58,7 +76,7 @@ export function PipelineControls(): React.JSX.Element {
           router.refresh();
         }
       } catch {
-        /* keep polling */
+        /* keep polling — transient network errors should not cancel the interval */
       }
     }, 3000);
     return () => clearInterval(interval);
@@ -109,6 +127,10 @@ export function PipelineControls(): React.JSX.Element {
         </select>
       </div>
 
+      {/*
+        Invisible spacer label keeps the button vertically aligned with the
+        labelled inputs above it without any absolute positioning.
+      */}
       <div className="flex flex-col justify-end gap-1">
         <span className="text-xs font-medium text-transparent select-none" aria-hidden="true">
           &nbsp;
@@ -118,17 +140,18 @@ export function PipelineControls(): React.JSX.Element {
           disabled={isSubmitDisabled}
           className="bg-blue-600 hover:bg-blue-700"
         >
-        {isRunning ? (
-          <>
-            <span className="animate-spin mr-2 inline-block">&#x27F3;</span>
-            Running Pipeline...
-          </>
-        ) : (
-          '⚡ Run Pipeline'
-        )}
+          {isRunning ? (
+            <>
+              <span className="animate-spin mr-2 inline-block">&#x27F3;</span>
+              Running Pipeline...
+            </>
+          ) : (
+            '⚡ Run Pipeline'
+          )}
         </Button>
       </div>
 
+      {/* Live progress display shown while a run is active or after it finishes */}
       {pipeStatus && (
         <div className="text-sm">
           {pipeStatus.status === 'running' && (

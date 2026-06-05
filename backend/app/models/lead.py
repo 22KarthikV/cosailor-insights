@@ -1,3 +1,12 @@
+"""Pydantic models for the leads and pipeline domains.
+
+ContractorRecord       — raw data returned by the GAF scraper
+LeadInsight            — AI-enriched scoring output produced by LeadEnricher
+LeadResponse           — full DB row shape returned by the leads API
+PipelineRunRequest     — request body for POST /api/pipeline/run
+PipelineRunResponse    — 202 response with run_id for status polling
+PipelineStatusResponse — payload for GET /api/pipeline/status/{run_id}
+"""
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -5,6 +14,11 @@ from pydantic import BaseModel, Field
 
 
 class ContractorRecord(BaseModel):
+    """Structured representation of a single GAF contractor as returned by the scraper.
+
+    All fields beyond company_name are Optional because the GAF directory does not
+    guarantee the presence of every field for every listing.
+    """
     company_name: str
     gaf_contractor_id: Optional[str] = None
     address: Optional[str] = None
@@ -23,19 +37,30 @@ class ContractorRecord(BaseModel):
 
 
 class LeadInsight(BaseModel):
+    """AI-generated scoring and sales intelligence for a single contractor.
+
+    lead_score and convertibility_score are constrained to 1–10 by Field validators.
+    ScoringService also enforces a ±1 clamp around each Python baseline after
+    Claude responds, so the database never receives out-of-range values.
+    """
     lead_score: int = Field(..., ge=1, le=10)
     score_rationale: str
     convertibility_score: int = Field(..., ge=1, le=10)
     convertibility_rationale: str
     distance_miles: Optional[float] = None
-    distance_band: str = "near"
-    priority_index: float = 0.0
+    distance_band: str = "near"       # 'near' | 'mid' | 'far'
+    priority_index: float = 0.0       # composite rank: (lead + conv) / 2 × distance modifier
     ai_summary: str
     talking_points: list[str] = Field(..., min_length=1, max_length=3)
     recommended_approach: str
 
 
 class LeadResponse(BaseModel):
+    """API response shape for a single lead row from the database.
+
+    Mirrors the leads table schema. All enrichment fields are Optional because a
+    lead may still be in the 'scraped' or 'researched' state when queried.
+    """
     id: UUID
     company_name: str
     city: Optional[str] = None
@@ -65,21 +90,27 @@ class LeadResponse(BaseModel):
 
 
 class PipelineRunRequest(BaseModel):
+    """Parameters for triggering a new pipeline run via POST /api/pipeline/run."""
     postal_code: str = "10013"
     country_code: str = "us"
     distance: int = 25
-    limit: Optional[int] = None
+    limit: Optional[int] = None   # test-only cap on number of contractors scraped
 
 
 class PipelineRunResponse(BaseModel):
+    """Immediate 202 response returned after a pipeline run is queued.
+
+    Callers should use run_id to poll GET /api/pipeline/status/{run_id}.
+    """
     run_id: UUID
     status: str
     message: str
 
 
 class PipelineStatusResponse(BaseModel):
+    """Current state of a pipeline run, returned by the status polling endpoint."""
     run_id: UUID
-    status: str
+    status: str   # 'running' | 'completed' | 'failed'
     leads_scraped: int
     leads_enriched: int
     started_at: datetime

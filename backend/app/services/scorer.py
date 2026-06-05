@@ -1,3 +1,20 @@
+"""Deterministic scoring engine for lead prioritization.
+
+ScoringService produces two independent baselines from structured data:
+
+  compute_lead_baseline()           — weighted quality score derived from
+                                      certifications, star rating, and review count
+  compute_convertibility_baseline() — opportunity score detected from Perplexity
+                                      research text (portfolio gap, growth, cert momentum)
+  compute_distance()                — haversine distance between contractor ZIP and
+                                      the search origin ZIP
+
+compute_priority_index() combines both scores with a distance modifier into a
+single sortable float used for dashboard ordering.
+
+All baselines are passed to LeadEnricher as anchors; Claude may adjust each
+score by at most ±1 but cannot exceed those bounds.
+"""
 import math
 import re
 from dataclasses import dataclass
@@ -10,6 +27,12 @@ import pgeocode
 
 @dataclass
 class LeadScoreComponents:
+    """Intermediate values produced by compute_lead_baseline().
+
+    size_points is always 5.0 (neutral) because revenue/headcount is not
+    available from the GAF directory. Claude adjusts the final lead_score
+    by up to ±1 based on Perplexity research context.
+    """
     cert_points: float
     size_points: float   # always 5.0 from Python; Claude adjusts final score ±1
     rating_points: float
@@ -19,6 +42,7 @@ class LeadScoreComponents:
 
 @dataclass
 class ConvertibilityComponents:
+    """Boolean signal flags and the resulting baseline from compute_convertibility_baseline()."""
     portfolio_gap_detected: bool
     growth_signal_detected: bool
     cert_momentum_detected: bool
@@ -27,32 +51,39 @@ class ConvertibilityComponents:
 
 @dataclass
 class DistanceResult:
+    """Haversine distance result from compute_distance()."""
     distance_miles: Optional[float]
     distance_band: str   # 'near' | 'mid' | 'far'
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
+# GAF certification tier → raw point value (out of 10, weight 40% in lead baseline)
 _CERT_POINTS: dict[str, float] = {
     "master elite": 10.0,
     "certified":     7.0,
 }
-_CERT_DEFAULT = 2.0
+_CERT_DEFAULT = 2.0  # uncertified contractors receive a minimal score, not zero
 
+# Competitor brand keywords used to detect a portfolio gap opportunity
 _COMPETITOR_BRANDS = [
     "owens corning", "certainteed", "iko", "tamko", "atlas", "malarkey",
 ]
+# Regex to detect exclusivity language that negates the portfolio gap signal
 _EXCLUSIVE_GAF = re.compile(r"exclusive(?:ly)?\s+gaf|gaf\s+exclusive", re.IGNORECASE)
 
+# Keywords indicating recent hiring or market expansion (growth signal)
 _GROWTH_KEYWORDS = [
     "hiring", "expanding", "new location", "new market", "growing", "opened",
 ]
 
+# Phrases suggesting the contractor recently earned or upgraded a GAF certification
 _CERT_MOMENTUM_KEYWORDS = [
     "recently certified", "just became", "newly certified",
     "recently became", "just certified", "new certification", "newly became",
 ]
 
+# Distance band → priority_index multiplier (nearer contractors rank higher)
 _DISTANCE_MODIFIER: dict[str, float] = {
     "near": 1.00,
     "mid":  0.95,
@@ -63,6 +94,7 @@ _DISTANCE_MODIFIER: dict[str, float] = {
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _cert_points(certifications: list[str]) -> float:
+    """Return raw certification points for the highest GAF tier present in the list."""
     if not certifications:
         return _CERT_DEFAULT
     cert_str = " ".join(certifications).lower()
@@ -74,12 +106,14 @@ def _cert_points(certifications: list[str]) -> float:
 
 
 def _rating_points(rating: Optional[float]) -> float:
+    """Convert a 0–5 star rating to a 0–10 point scale. Returns neutral 5.0 when missing."""
     if rating is None:
         return 5.0  # neutral when missing
     return min(rating * 2.0, 10.0)
 
 
 def _review_points(review_count: Optional[int]) -> float:
+    """Score review volume on a 0–10 scale, capping at 50 reviews for full marks."""
     if not review_count:
         return 0.0
     return min((review_count / 50.0) * 10.0, 10.0)
@@ -88,7 +122,15 @@ def _review_points(review_count: Optional[int]) -> float:
 # ── Service ───────────────────────────────────────────────────────────────────
 
 class ScoringService:
+    """Stateless service that computes lead and convertibility baselines."""
+
     def compute_lead_baseline(self, contractor) -> LeadScoreComponents:
+        """Compute a weighted lead quality score from structured contractor attributes.
+
+        Weights: certification 40%, company size 25%, star rating 25%, review count 10%.
+        Size is always 5.0 (neutral) because revenue/headcount is not available from GAF;
+        Claude adjusts the final score using the Perplexity research context.
+        """
         cert    = _cert_points(contractor.certifications)
         size    = 5.0  # neutral; Claude adjusts based on research text
         rating  = _rating_points(contractor.rating)
@@ -108,6 +150,15 @@ class ScoringService:
     def compute_convertibility_baseline(
         self, research_text: Optional[str]
     ) -> ConvertibilityComponents:
+        """Detect conversion opportunity signals in Perplexity research text.
+
+        Three binary signals are combined with fixed weights:
+          - Portfolio gap (40%): competitor brands present with no GAF-exclusivity language
+          - Growth signals (35%): keywords indicating expansion or hiring activity
+          - Cert momentum (25%): phrases indicating a recently achieved GAF certification
+
+        Returns a baseline of 1.0 when no research text is available.
+        """
         if not research_text:
             return ConvertibilityComponents(
                 portfolio_gap_detected=False,
@@ -146,6 +197,11 @@ class ScoringService:
     def compute_distance(
         self, contractor_postal: Optional[str], search_postal: str
     ) -> DistanceResult:
+        """Calculate the haversine distance between two US ZIP codes using pgeocode.
+
+        Returns distance_band='near' with distance_miles=None when either postal
+        code is missing, or when pgeocode returns NaN coordinates for unrecognised ZIPs.
+        """
         if not contractor_postal or not search_postal:
             return DistanceResult(distance_miles=None, distance_band="near")
 
@@ -159,7 +215,7 @@ class ScoringService:
             if any(math.isnan(float(v)) for v in coords):
                 return DistanceResult(distance_miles=None, distance_band="near")
 
-            # Haversine formula
+            # Haversine formula — earth radius 6371 km, converted to miles
             lat1 = math.radians(float(origin.latitude))
             lon1 = math.radians(float(origin.longitude))
             lat2 = math.radians(float(dest.latitude))
@@ -191,5 +247,12 @@ def compute_priority_index(
     convertibility_score: int,
     distance_band: str,
 ) -> float:
+    """Combine lead and convertibility scores into a single sortable priority index.
+
+    Formula: ((lead_score + convertibility_score) / 2) × distance_modifier
+
+    Distance modifiers: near=1.00, mid=0.95, far=0.90.
+    Defaults to modifier 1.0 for unrecognised band values.
+    """
     modifier = _DISTANCE_MODIFIER.get(distance_band, 1.0)
     return round(((lead_score + convertibility_score) / 2) * modifier, 3)

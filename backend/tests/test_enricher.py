@@ -1,6 +1,13 @@
+"""Tests for LeadEnricher (services/enricher.py).
+
+Covers JSON parsing (clean and fenced), score clamping, and correct
+ScoringService delegation. All Anthropic API calls are mocked so these
+tests run without credentials.
+"""
 import pytest
 from unittest.mock import MagicMock, patch
 
+# Representative Claude response used across multiple tests
 MOCK_JSON = """{
   "lead_score": 9,
   "score_rationale": "Master Elite certified with strong reviews justifies top-tier score.",
@@ -17,6 +24,7 @@ MOCK_JSON = """{
 
 
 def test_enricher_parses_clean_json(sample_contractor):
+    """A clean JSON response from Claude is parsed into a valid LeadInsight."""
     from app.services.scorer import (
         LeadScoreComponents, ConvertibilityComponents, DistanceResult
     )
@@ -64,6 +72,7 @@ def test_enricher_parses_clean_json(sample_contractor):
 
 
 def test_enricher_strips_markdown_fences(sample_contractor):
+    """A JSON response wrapped in ```json``` fences is parsed correctly."""
     from app.services.scorer import (
         LeadScoreComponents, ConvertibilityComponents, DistanceResult
     )
@@ -151,7 +160,7 @@ def test_enricher_clamps_lead_score_to_baseline_plus_one(sample_contractor):
 
 
 def test_enricher_scorer_called_with_correct_args(sample_contractor):
-    """Verify ScoringService is called with the right arguments."""
+    """ScoringService is called with the contractor and the correct research text."""
     from app.services.scorer import (
         LeadScoreComponents, ConvertibilityComponents, DistanceResult
     )

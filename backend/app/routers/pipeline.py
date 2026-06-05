@@ -1,3 +1,13 @@
+"""FastAPI router for pipeline trigger and status-polling endpoints.
+
+POST /run             — starts a pipeline BackgroundTask and returns 202 immediately.
+GET  /status/{run_id} — polls the pipeline_runs table for current progress.
+
+The pipeline runs as a FastAPI BackgroundTask so the HTTP response is returned
+before the (potentially long) scrape / research / enrich work finishes.
+Callers must poll /status/{run_id} at their chosen interval until status is
+'completed' or 'failed'.
+"""
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from supabase import acreate_client
 
@@ -14,6 +24,11 @@ router = APIRouter()
 
 @router.post("/run", status_code=202, response_model=PipelineRunResponse)
 async def run_pipeline(body: PipelineRunRequest, background_tasks: BackgroundTasks):
+    """Queue a pipeline run and return 202 with a run_id for status polling.
+
+    All four service dependencies are constructed here so they share the same
+    Supabase client and API credentials for the lifetime of the background task.
+    """
     client = await acreate_client(settings.supabase_url, settings.supabase_key)
     repo = LeadRepository(client)
     run_id = await repo.create_pipeline_run(
@@ -40,6 +55,7 @@ async def run_pipeline(body: PipelineRunRequest, background_tasks: BackgroundTas
 
 @router.get("/status/{run_id}", response_model=PipelineStatusResponse)
 async def pipeline_status(run_id: str):
+    """Return current state of a pipeline run. Raises 404 when run_id is unknown."""
     client = await acreate_client(settings.supabase_url, settings.supabase_key)
     repo = LeadRepository(client)
     run = await repo.get_pipeline_run(run_id)

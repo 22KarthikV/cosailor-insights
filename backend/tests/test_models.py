@@ -1,4 +1,13 @@
+"""Tests for Pydantic model validation (models/lead.py).
+
+Verifies that new scoring fields (convertibility, distance, priority_index)
+have the expected optionality and default values, and that required fields
+are enforced at model construction time.
+"""
+
+
 def test_lead_insight_requires_convertibility_fields():
+    """LeadInsight raises when convertibility_score and convertibility_rationale are absent."""
     from app.models.lead import LeadInsight
     import pytest
 
@@ -14,6 +23,7 @@ def test_lead_insight_requires_convertibility_fields():
 
 
 def test_lead_insight_accepts_all_fields():
+    """A fully-populated LeadInsight is constructed without errors."""
     from app.models.lead import LeadInsight
 
     insight = LeadInsight(
@@ -34,6 +44,7 @@ def test_lead_insight_accepts_all_fields():
 
 
 def test_lead_response_new_fields_are_optional():
+    """LeadResponse can be constructed without scoring-redesign fields (they default to None)."""
     from app.models.lead import LeadResponse
     from uuid import uuid4
     from datetime import datetime, timezone

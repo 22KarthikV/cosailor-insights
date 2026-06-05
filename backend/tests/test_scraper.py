@@ -1,9 +1,15 @@
+"""Tests for GafScraper (services/scraper.py).
+
+Verifies URL parameterisation, JSON-to-ContractorRecord mapping, graceful
+handling of null Firecrawl responses, and enforcement of the config.limit cap.
+All Firecrawl API calls are mocked so these tests run without credentials.
+"""
 import pytest
 from unittest.mock import MagicMock, patch
 
 
 def _make_mock_result(contractors_data: list | None = None) -> MagicMock:
-    """Build a mock ScrapeResponse where json_field matches firecrawl-py 2.x structure."""
+    """Build a mock ScrapeResponse where json_field matches the firecrawl-py 2.x structure."""
     mock_result = MagicMock()
     if contractors_data is None:
         mock_result.json_field = None
@@ -13,7 +19,7 @@ def _make_mock_result(contractors_data: list | None = None) -> MagicMock:
 
 
 def test_scraper_url_uses_configurable_params():
-    """Scraper URL must use postal_code, country_code, and distance — never hardcoded."""
+    """The scrape URL must contain postalCode, countryCode, and distance from ScraperConfig."""
     from app.services.scraper import GafScraper
     from app.config import ScraperConfig
 
@@ -33,7 +39,7 @@ def test_scraper_url_uses_configurable_params():
 
 
 def test_scraper_returns_contractor_records():
-    """Scraper maps Firecrawl response to ContractorRecord list."""
+    """Firecrawl JSON output is correctly mapped to a ContractorRecord list."""
     from app.services.scraper import GafScraper
     from app.config import ScraperConfig
 
@@ -69,6 +75,7 @@ def test_scraper_returns_contractor_records():
 
 
 def test_scraper_handles_null_json_gracefully():
+    """When Firecrawl returns no JSON data the scraper returns an empty list without raising."""
     from app.services.scraper import GafScraper
     from app.config import ScraperConfig
 
@@ -83,7 +90,7 @@ def test_scraper_handles_null_json_gracefully():
 
 
 def test_scraper_respects_limit():
-    """limit=1 in ScraperConfig should return at most 1 contractor."""
+    """ScraperConfig.limit=1 caps the returned contractor list to at most 1 entry."""
     from app.services.scraper import GafScraper
     from app.config import ScraperConfig
 
