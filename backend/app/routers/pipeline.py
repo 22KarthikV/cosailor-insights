@@ -16,6 +16,7 @@ from app.models.lead import PipelineRunRequest, PipelineRunResponse, PipelineSta
 from app.repositories.lead_repository import LeadRepository
 from app.services.enricher import LeadEnricher
 from app.services.pipeline import PipelineService
+from app.services.playwright_scraper import PlaywrightScraper
 from app.services.researcher import ContractorResearcher
 from app.services.scraper import GafScraper
 
@@ -26,6 +27,7 @@ router = APIRouter()
 async def run_pipeline(body: PipelineRunRequest, background_tasks: BackgroundTasks):
     """Queue a pipeline run and return 202 with a run_id for status polling.
 
+    Instantiates PlaywrightScraper or GafScraper based on body.scraper.
     All four service dependencies are constructed here so they share the same
     Supabase client and API credentials for the lifetime of the background task.
     """
@@ -37,9 +39,15 @@ async def run_pipeline(body: PipelineRunRequest, background_tasks: BackgroundTas
         distance=body.distance,
     )
 
+    scraper = (
+        PlaywrightScraper()
+        if body.scraper == "playwright"
+        else GafScraper(api_key=settings.firecrawl_api_key)
+    )
+
     service = PipelineService(
         repo=repo,
-        scraper=GafScraper(api_key=settings.firecrawl_api_key),
+        scraper=scraper,
         researcher=ContractorResearcher(api_key=settings.perplexity_api_key),
         enricher=LeadEnricher(api_key=settings.anthropic_api_key),
     )

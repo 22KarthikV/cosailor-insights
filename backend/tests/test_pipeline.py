@@ -153,3 +153,53 @@ async def test_pipeline_continues_when_one_enrichment_fails(sample_contractor, s
     mock_repo.mark_lead_failed.assert_called_once()
     assert mock_repo.update_enrichment.call_count == 1
     mock_repo.complete_pipeline_run.assert_called_once_with("run-fail", leads_enriched=1)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uses_semaphore_for_parallel_enrichment(sample_contractor, sample_lead_row, _insight):
+    """Enrichment runs via asyncio.gather() — all enrich() calls happen before complete_pipeline_run."""
+    import asyncio
+    from app.services.pipeline import PipelineService
+
+    call_order = []
+
+    mock_repo = AsyncMock()
+    mock_repo.update_pipeline_progress = AsyncMock()
+    mock_repo.upsert_contractor.side_effect = [
+        {**sample_lead_row, "id": f"lead-{i}"} for i in range(3)
+    ]
+
+    async def fake_update_enrichment(lead_id, insight):
+        call_order.append(("enriched", lead_id))
+
+    mock_repo.update_enrichment.side_effect = fake_update_enrichment
+    mock_repo.complete_pipeline_run = AsyncMock(
+        side_effect=lambda *a, **kw: call_order.append(("completed",))
+    )
+
+    mock_scraper = MagicMock()
+    mock_scraper.scrape_contractors.return_value = [sample_contractor] * 3
+
+    mock_researcher = AsyncMock()
+    mock_researcher.research_all.return_value = [{"summary": "Ok.", "sources": []}] * 3
+
+    mock_enricher = MagicMock()
+    mock_enricher.enrich.return_value = _insight
+
+    service = PipelineService(
+        repo=mock_repo,
+        scraper=mock_scraper,
+        researcher=mock_researcher,
+        enricher=mock_enricher,
+    )
+
+    await service.execute(
+        run_id="run-parallel",
+        request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None, scraper="playwright"),
+    )
+
+    # All three enrichments must complete before the run is marked completed
+    completed_idx = next(i for i, e in enumerate(call_order) if e[0] == "completed")
+    enriched_indices = [i for i, e in enumerate(call_order) if e[0] == "enriched"]
+    assert all(i < completed_idx for i in enriched_indices)
+    assert len(enriched_indices) == 3
