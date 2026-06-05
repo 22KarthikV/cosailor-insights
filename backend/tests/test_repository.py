@@ -20,6 +20,11 @@ async def test_upsert_contractor_returns_row_with_id(sample_contractor):
 
     # Supabase query chain is SYNCHRONOUS until .execute() which is async
     mock_table = MagicMock()
+    # SELECT guard is not called when gaf_contractor_id is None, but mock it
+    # explicitly so the test stays correct if sample_contractor gains a gaf_contractor_id later.
+    mock_table.select.return_value.eq.return_value.execute = AsyncMock(
+        return_value=MagicMock(data=[])
+    )
     mock_table.upsert.return_value.execute = AsyncMock(return_value=mock_result)
 
     mock_client = MagicMock()
@@ -92,6 +97,42 @@ async def test_upsert_contractor_preserves_enriched_status(sample_contractor):
     upsert_payload = mock_table.upsert.call_args[0][0]
     assert upsert_payload["status"] == "enriched"
     assert result["status"] == "enriched"
+
+
+@pytest.mark.asyncio
+async def test_upsert_contractor_new_lead_with_gaf_id_gets_scraped_status():
+    """When gaf_contractor_id is set but no existing row is found, status defaults to 'scraped'."""
+    from app.repositories.lead_repository import LeadRepository
+    from app.models.lead import ContractorRecord
+
+    lead_id = str(uuid4())
+
+    # SELECT returns empty (new lead — no existing row)
+    check_result = MagicMock()
+    check_result.data = []
+
+    upsert_result = MagicMock()
+    upsert_result.data = [{"id": lead_id, "status": "scraped"}]
+
+    mock_table = MagicMock()
+    # SELECT chain: .select().eq().execute()
+    mock_table.select.return_value.eq.return_value.execute = AsyncMock(return_value=check_result)
+    # UPSERT chain: .upsert().execute()
+    mock_table.upsert.return_value.execute = AsyncMock(return_value=upsert_result)
+
+    mock_client = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    contractor = ContractorRecord(
+        company_name="New Co",
+        gaf_contractor_id="new-gaf-123",
+    )
+    repo = LeadRepository(client=mock_client)
+    result = await repo.upsert_contractor(contractor)
+
+    upsert_payload = mock_table.upsert.call_args[0][0]
+    assert upsert_payload["status"] == "scraped"
+    assert result["id"] == lead_id
 
 
 @pytest.mark.asyncio
