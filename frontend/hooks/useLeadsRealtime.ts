@@ -16,11 +16,12 @@
  * - The initialLeads effect re-syncs state whenever the parent Server Component
  *   re-fetches (e.g. after router.refresh() is called by PipelineControls).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Lead } from '@/lib/types'
 
 export function useLeadsRealtime(initialLeads: Lead[]): Lead[] {
+  const channelRef = useRef(`leads-realtime-${crypto.randomUUID()}`)
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
 
   useEffect(() => {
@@ -29,7 +30,7 @@ export function useLeadsRealtime(initialLeads: Lead[]): Lead[] {
 
   useEffect(() => {
     const channel = supabase
-      .channel('leads-realtime')
+      .channel(channelRef.current)
       .on(
         'postgres_changes',
         {

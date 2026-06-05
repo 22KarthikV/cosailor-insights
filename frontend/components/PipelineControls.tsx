@@ -9,7 +9,7 @@
  * This means partial cards appear as soon as scraping writes leads to the DB,
  * and score badges fill in progressively as each enrichment completes.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { triggerPipeline, getPipelineStatus } from '@/lib/api';
@@ -23,6 +23,13 @@ const DEFAULT_COUNTRY_CODE = 'us' as const;
 const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
 
 export function PipelineControls(): React.JSX.Element {
+  const isMounted = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
   const router = useRouter();
   const [runId, setRunId] = useState<string | null>(null);
   const [pipeStatus, setPipeStatus] = useState<PipelineStatusResponse | null>(null);
@@ -70,6 +77,7 @@ export function PipelineControls(): React.JSX.Element {
     const interval = setInterval(async () => {
       try {
         const status = await getPipelineStatus(runId);
+        if (!isMounted.current) return;
         setPipeStatus(status);
         // Always revalidate + refresh — shows partial cards during scraping
         // and progressively filled cards during enrichment.
