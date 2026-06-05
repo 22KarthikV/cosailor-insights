@@ -3,15 +3,17 @@
  *
  * All functions are thin wrappers around fetch() that throw on non-2xx
  * responses. They are intentionally stateless — no caching layer is added
- * here; Next.js cache: 'no-store' ensures fresh data on every server render.
+ * here; caching is handled by getCachedLeads() in lib/leads.ts.
  */
-import type { Lead, PipelineRunResponse, PipelineStatusResponse } from './types';
+import type { Lead, PaginatedLeadsResponse, PipelineRunResponse, PipelineStatusResponse } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-/** Fetch all leads ordered by priority_index descending. */
-export async function getLeads(): Promise<Lead[]> {
-  const res = await fetch(`${API_BASE}/api/leads/`, { cache: 'no-store' });
+/** Fetch a paginated page of leads ordered by priority_index descending. */
+export async function getLeads(page: number = 1, limit: number = 12): Promise<PaginatedLeadsResponse> {
+  const res = await fetch(`${API_BASE}/api/leads/?page=${page}&limit=${limit}`, {
+    cache: 'no-store',
+  });
   if (!res.ok) throw new Error(`Failed to fetch leads: ${res.status}`);
   return res.json();
 }
@@ -25,18 +27,18 @@ export async function getLead(id: string): Promise<Lead> {
 
 /**
  * Start a new pipeline run and return the 202 response with a run_id.
- * The pipeline executes as a backend BackgroundTask; poll getPipelineStatus()
- * to track progress.
+ * scraper selects which backend scraper to use ('playwright' or 'firecrawl').
  */
 export async function triggerPipeline(
   postalCode: string = '10013',
   countryCode: string = 'us',
-  distance: number = 25
+  distance: number = 25,
+  scraper: 'playwright' | 'firecrawl' = 'playwright'
 ): Promise<PipelineRunResponse> {
   const res = await fetch(`${API_BASE}/api/pipeline/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ postal_code: postalCode, country_code: countryCode, distance }),
+    body: JSON.stringify({ postal_code: postalCode, country_code: countryCode, distance, scraper }),
   });
   if (!res.ok) throw new Error(`Failed to start pipeline: ${res.status}`);
   return res.json();

@@ -44,6 +44,14 @@ export interface Lead {
   created_at: string;
 }
 
+/** Paginated response from GET /api/leads. */
+export interface PaginatedLeadsResponse {
+  leads: Lead[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 /** Immediate 202 response returned by POST /api/pipeline/run. */
 export interface PipelineRunResponse {
   run_id: string;

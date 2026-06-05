@@ -12,14 +12,15 @@ import { Suspense } from 'react';
 import { LeadsGridClient } from '@/components/LeadsGridClient';
 import { PipelineControls } from '@/components/PipelineControls';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getLeads } from '@/lib/api';
+import { getCachedLeads } from '@/lib/leads';
 import type { Lead } from '@/lib/types';
 
 /** Async sub-component that fetches leads and passes them to the client grid. */
 async function LeadsSection() {
   let leads: Lead[] = [];
   try {
-    leads = await getLeads();
+    const data = await getCachedLeads(1, 12);
+    leads = data.leads;
   } catch (err) {
     console.error('[LeadsSection] Failed to fetch leads:', err);
     /* backend not running or returned an error — render empty state */
