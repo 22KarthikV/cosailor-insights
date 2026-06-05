@@ -1,12 +1,10 @@
 /**
  * Dashboard page — the application's home route ("/").
  *
- * This is an async Server Component. It renders a header with score-tier
- * legend and PipelineControls, then lazily streams the leads grid via Suspense.
- *
- * LeadsSection fetches leads server-side on each request (cache: 'no-store').
- * A failed fetch is caught and swallowed so the page renders an empty grid
- * rather than crashing when the backend is not running.
+ * Reads page and limit from URL searchParams so pagination is URL-driven
+ * (shareable, back-button safe). Falls back to page=1, limit=12 when absent.
+ * Uses getCachedLeads() so post-run loads are served from the Next.js cache.
+ * During a pipeline run the cache is busted every 3 s by PipelineControls.
  */
 import { Suspense } from 'react';
 import { LeadsGridClient } from '@/components/LeadsGridClient';
@@ -15,20 +13,38 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getCachedLeads } from '@/lib/leads';
 import type { Lead } from '@/lib/types';
 
-/** Async sub-component that fetches leads and passes them to the client grid. */
-async function LeadsSection() {
-  let leads: Lead[] = [];
-  try {
-    const data = await getCachedLeads(1, 12);
-    leads = data.leads;
-  } catch (err) {
-    console.error('[LeadsSection] Failed to fetch leads:', err);
-    /* backend not running or returned an error — render empty state */
-  }
-  return <LeadsGridClient leads={leads} />;
+const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
+
+interface LeadsSectionProps {
+  page: number;
+  limit: number;
 }
 
-export default function DashboardPage() {
+async function LeadsSection({ page, limit }: LeadsSectionProps) {
+  let leads: Lead[] = [];
+  let total = 0;
+  try {
+    const result = await getCachedLeads(page, limit);
+    leads = result.leads;
+    total = result.total;
+  } catch (err) {
+    console.error('[LeadsSection] Failed to fetch leads:', err);
+  }
+  return <LeadsGridClient leads={leads} page={page} limit={limit} total={total} />;
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string; limit?: string }>;
+}) {
+  const params = await searchParams;
+  const page = Math.max(1, parseInt(params.page ?? '1', 10) || 1);
+  const rawLimit = parseInt(params.limit ?? '12', 10);
+  const limit = PAGE_SIZE_OPTIONS.includes(rawLimit as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? rawLimit
+    : 12;
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <div className="mb-8">
@@ -42,7 +58,6 @@ export default function DashboardPage() {
           <PipelineControls />
         </div>
 
-        {/* Score-tier legend: maps colour coding to lead_score ranges */}
         <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
           <span className="flex items-center gap-1">
             <span className="w-3 h-3 rounded-full bg-green-400 inline-block" />
@@ -69,7 +84,7 @@ export default function DashboardPage() {
           </div>
         }
       >
-        <LeadsSection />
+        <LeadsSection page={page} limit={limit} />
       </Suspense>
     </div>
   );

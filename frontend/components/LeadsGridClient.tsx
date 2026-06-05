@@ -13,6 +13,7 @@
  *   LeadFilterControls — score-tier filter buttons and sort selector
  */
 import React, { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { LeadCard } from './LeadCard';
 import type { Lead } from '@/lib/types';
 import { useLeadsRealtime } from '@/hooks/useLeadsRealtime';
@@ -22,6 +23,9 @@ type SortOption = 'score_desc' | 'name_asc' | 'recently_enriched';
 
 interface LeadsGridClientProps {
   leads: Lead[];
+  page: number;
+  limit: number;
+  total: number;
 }
 
 interface StatChipProps {
@@ -180,13 +184,81 @@ function LeadFilterControls({
   );
 }
 
-export function LeadsGridClient({ leads: initialLeads }: LeadsGridClientProps): React.JSX.Element {
+const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
+
+interface PaginationControlsProps {
+  page: number;
+  limit: number;
+  total: number;
+}
+
+function PaginationControls({ page, limit, total }: PaginationControlsProps): React.JSX.Element {
+  const router = useRouter();
+  const totalPages = Math.ceil(total / limit);
+  const startItem = total === 0 ? 0 : (page - 1) * limit + 1;
+  const endItem = Math.min(page * limit, total);
+
+  const navigate = (newPage: number, newLimit: number) => {
+    const params = new URLSearchParams();
+    params.set('page', String(newPage));
+    params.set('limit', String(newLimit));
+    router.push(`/?${params.toString()}`);
+  };
+
+  return (
+    <div className="flex items-center justify-between flex-wrap gap-3 mt-4">
+      <span className="text-xs text-gray-500">
+        {total === 0 ? 'No leads' : `Showing ${startItem}–${endItem} of ${total} leads`}
+      </span>
+
+      <div className="flex items-center gap-2">
+        <label htmlFor="page-size" className="text-xs text-gray-500">
+          Per page:
+        </label>
+        <select
+          id="page-size"
+          value={limit}
+          onChange={(e) => navigate(1, Number(e.target.value))}
+          className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          {PAGE_SIZE_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => navigate(page - 1, limit)}
+          disabled={page <= 1}
+          className="px-3 py-1 text-xs rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Prev
+        </button>
+        <span className="text-xs text-gray-500">
+          {page} / {totalPages || 1}
+        </span>
+        <button
+          type="button"
+          onClick={() => navigate(page + 1, limit)}
+          disabled={page >= totalPages}
+          className="px-3 py-1 text-xs rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function LeadsGridClient({ leads: initialLeads, page, limit, total }: LeadsGridClientProps): React.JSX.Element {
   // Merge real-time Supabase updates on top of the server-fetched initial state
   const leads = useLeadsRealtime(initialLeads)
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [sortOption, setSortOption] = useState<SortOption>('score_desc');
 
-  const { total, enrichedCount, avgScore } = useMemo(() => computeStats(leads), [leads]);
+  const { total: pageTotal, enrichedCount, avgScore } = useMemo(() => computeStats(leads), [leads]);
   const displayedLeads = useMemo(
     () => sortLeads(filterLeads(leads, scoreFilter), sortOption),
     [leads, scoreFilter, sortOption]
@@ -207,11 +279,11 @@ export function LeadsGridClient({ leads: initialLeads }: LeadsGridClientProps): 
   return (
     <div className="space-y-4">
       <StatsBar
-        total={total}
+        total={pageTotal}
         enrichedCount={enrichedCount}
         avgScore={avgScore !== null ? avgScore.toFixed(1) : '—'}
       />
-      <p className="text-xs text-gray-400 mb-2">{leads.length} contractors found</p>
+      <p className="text-xs text-gray-400 mb-2">{total} contractors total</p>
       <LeadFilterControls
         scoreFilter={scoreFilter}
         sortOption={sortOption}
@@ -235,6 +307,7 @@ export function LeadsGridClient({ leads: initialLeads }: LeadsGridClientProps): 
           ))}
         </div>
       )}
+      <PaginationControls page={page} limit={limit} total={total} />
     </div>
   );
 }
