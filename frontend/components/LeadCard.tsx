@@ -11,11 +11,22 @@ import { Badge } from '@/components/ui/badge';
 import { ScoreBadge } from './ScoreBadge';
 import type { Lead } from '@/lib/types';
 
-export function LeadCard({ lead }: { lead: Lead }) {
+interface LeadCardProps {
+  lead: Lead;
+  page?: number;
+  limit?: number;
+}
+
+export function LeadCard({ lead, page, limit }: LeadCardProps) {
   const location = [lead.city, lead.state].filter(Boolean).join(', ');
+  const params = new URLSearchParams();
+  if (page && page > 1) params.set('from_page', String(page));
+  if (limit) params.set('from_limit', String(limit));
+  const qs = params.toString();
+  const href = `/leads/${lead.id}${qs ? `?${qs}` : ''}`;
 
   return (
-    <Link href={`/leads/${lead.id}`} className="block group h-full">
+    <Link href={href} className="block group h-full">
       <Card className="h-full transition-shadow hover:shadow-md border-gray-200 group-hover:border-blue-300">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">

@@ -18,17 +18,24 @@ import ReactMarkdown from 'react-markdown';
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ from_page?: string; from_limit?: string }>;
 }
 
-export default async function LeadDetailPage({ params }: Props) {
+export default async function LeadDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { from_page, from_limit } = await searchParams;
   const lead = await getLead(id).catch(() => notFound());
+
+  const backParams = new URLSearchParams();
+  if (from_page) backParams.set('page', from_page);
+  if (from_limit) backParams.set('limit', from_limit);
+  const backHref = `/${backParams.toString() ? `?${backParams.toString()}` : ''}`;
 
   const location = [lead.city, lead.state].filter(Boolean).join(', ');
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <Link href="/" className="text-sm text-blue-600 hover:underline mb-6 inline-block">
+      <Link href={backHref} className="text-sm text-blue-600 hover:underline mb-6 inline-block">
         &larr; Back to Dashboard
       </Link>
 
@@ -60,72 +67,34 @@ export default async function LeadDetailPage({ params }: Props) {
           )}
         </div>
 
-        {/* Dual score column: lead score and convertibility score side by side */}
-        <div className="flex flex-row items-start gap-6 shrink-0">
-          {/* Lead Score */}
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs text-gray-400 font-medium">Lead Score</span>
-            <ScoreBadge score={lead.lead_score} size="lg" />
-            {lead.lead_score !== null && (
-              <div className="w-24">
-                <div className="bg-gray-200 rounded-full h-1.5 overflow-hidden">
+        {/* Compact score chips — badge + mini-bar only; rationale lives in the Score Analysis card below */}
+        <div className="flex flex-row items-center gap-5 shrink-0">
+          {(
+            [
+              { label: 'Lead', score: lead.lead_score, ariaLabel: 'Lead score' },
+              { label: 'Conv.', score: lead.convertibility_score, ariaLabel: 'Convertibility score' },
+            ] as const
+          ).map(({ label, score, ariaLabel }) =>
+            score !== null ? (
+              <div key={label} className="flex flex-col items-center gap-1.5">
+                <span className="text-xs text-gray-400 font-medium">{label}</span>
+                <ScoreBadge score={score} size="lg" />
+                <div className="w-14 bg-gray-200 rounded-full h-1 overflow-hidden">
                   <div
                     className={
-                      'h-1.5 rounded-full ' +
-                      (lead.lead_score >= 8
-                        ? 'bg-green-500'
-                        : lead.lead_score >= 5
-                          ? 'bg-yellow-500'
-                          : 'bg-red-500')
+                      'h-1 rounded-full ' +
+                      (score >= 8 ? 'bg-green-500' : score >= 5 ? 'bg-yellow-500' : 'bg-red-500')
                     }
-                    style={{ width: `${Math.min(100, Math.max(0, (lead.lead_score / 10) * 100))}%` }}
+                    style={{ width: `${(score / 10) * 100}%` }}
                     role="progressbar"
-                    aria-valuenow={lead.lead_score}
+                    aria-valuenow={score}
                     aria-valuemin={0}
                     aria-valuemax={10}
-                    aria-label={`Lead score: ${lead.lead_score} out of 10`}
+                    aria-label={`${ariaLabel}: ${score} out of 10`}
                   />
                 </div>
               </div>
-            )}
-            {lead.score_rationale && (
-              <p className="text-xs text-gray-400 italic text-center max-w-28 leading-snug">
-                {lead.score_rationale}
-              </p>
-            )}
-          </div>
-
-          {/* Convertibility Score — only rendered when present */}
-          {lead.convertibility_score !== null && (
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-xs text-gray-400 font-medium">Convertibility</span>
-              <ScoreBadge score={lead.convertibility_score} size="lg" />
-              <div className="w-24">
-                <div className="bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className={
-                      'h-1.5 rounded-full ' +
-                      (lead.convertibility_score >= 8
-                        ? 'bg-green-500'
-                        : lead.convertibility_score >= 5
-                          ? 'bg-yellow-500'
-                          : 'bg-red-500')
-                    }
-                    style={{ width: `${Math.min(100, Math.max(0, (lead.convertibility_score / 10) * 100))}%` }}
-                    role="progressbar"
-                    aria-valuenow={lead.convertibility_score}
-                    aria-valuemin={0}
-                    aria-valuemax={10}
-                    aria-label={`Convertibility score: ${lead.convertibility_score} out of 10`}
-                  />
-                </div>
-              </div>
-              {lead.convertibility_rationale && (
-                <p className="text-xs text-gray-400 italic text-center max-w-28 leading-snug">
-                  {lead.convertibility_rationale}
-                </p>
-              )}
-            </div>
+            ) : null
           )}
         </div>
       </div>
@@ -147,6 +116,31 @@ export default async function LeadDetailPage({ params }: Props) {
       )}
 
       <div className="space-y-4">
+        {/* Score Analysis — rationale text lives here, not in the compact header chips */}
+        {(lead.score_rationale || lead.convertibility_rationale) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">Score Analysis</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                {lead.score_rationale && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide mb-1">Lead Score</dt>
+                    <dd className="text-gray-700 leading-snug">{lead.score_rationale}</dd>
+                  </div>
+                )}
+                {lead.convertibility_rationale && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide mb-1">Convertibility</dt>
+                    <dd className="text-gray-700 leading-snug">{lead.convertibility_rationale}</dd>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Opportunity Signals — distance band + composite priority index */}
         {(lead.distance_band !== null || lead.priority_index !== null) && (
           <Card>
