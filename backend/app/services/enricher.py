@@ -114,7 +114,7 @@ class LeadEnricher:
 
         message = self._client.messages.create(
             model="claude-haiku-4-5",
-            max_tokens=900,
+            max_tokens=1024,
             temperature=0.3,
             system=_SYSTEM,
             messages=[{
@@ -124,6 +124,15 @@ class LeadEnricher:
         )
         raw  = message.content[0].text.strip()
         data = self._parse(raw)
+
+        # Haiku occasionally omits rationale fields — supply a fallback so
+        # LeadInsight construction never fails on a missing-but-computable key.
+        if not data.get("score_rationale"):
+            data["score_rationale"] = f"Lead score based on certifications, rating, and review volume."
+        if not data.get("convertibility_rationale"):
+            data["convertibility_rationale"] = (
+                f"Convertibility based on portfolio gap, growth signals, and cert momentum."
+            )
 
         # Clamp each score within ±1 of its Python baseline to prevent LLM drift
         lead_int = round(lead_comps.baseline)
