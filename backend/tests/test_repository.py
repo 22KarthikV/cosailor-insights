@@ -191,9 +191,8 @@ async def test_update_enrichment_sets_status_to_enriched():
     mock_client.table.return_value = mock_table
 
     repo = LeadRepository(client=mock_client)
-    result = await repo.update_enrichment(lead_id, insight)
+    await repo.update_enrichment(lead_id, insight)
 
-    assert result["id"] == lead_id
     call_data = mock_table.update.call_args[0][0]
     assert call_data["lead_score"] == 9
     assert call_data["convertibility_score"] == 7

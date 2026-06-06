@@ -125,3 +125,6 @@ class PipelineStatusResponse(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    postal_code: str = "10013"
+    country_code: str = "us"
+    distance: int = 25

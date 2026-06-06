@@ -57,44 +57,84 @@ class PipelineService:
             )
 
             # Stage 1: Scrape contractors from the GAF directory
-            contractors = await asyncio.to_thread(self._scraper.scrape_contractors, config)
+            contractors = await self._scraper.scrape_contractors(config)
             await repo.update_pipeline_progress(run_id, leads_scraped=len(contractors))
 
             lead_rows = [await repo.upsert_contractor(c) for c in contractors]
 
-            # Stage 2: Research all contractors via Perplexity
-            research_results = await self._researcher.research_all(contractors)
-            for row, research in zip(lead_rows, research_results):
-                await repo.update_research(
-                    row["id"], research.get("summary", ""), research.get("sources", [])
-                )
+            # Bucket leads by how much work they still need.
+            # Already-enriched leads are counted as done and skipped entirely.
+            # Already-researched leads skip stage 2 but still run stage 3.
+            # Scraped / failed leads run the full pipeline.
+            to_research: list[tuple[dict, object]] = []
+            to_enrich_only: list[tuple[dict, object, dict]] = []
+            already_enriched_count = 0
 
-            # Stage 3: Enrich in parallel with a concurrency cap
-            enriched_count = await self._enrich_parallel(
-                repo, lead_rows, contractors, research_results, request.postal_code
+            for row, contractor in zip(lead_rows, contractors):
+                if row["status"] == "enriched":
+                    already_enriched_count += 1
+                elif row["status"] == "researched":
+                    stored_summary = row.get("research_summary") or ""
+                    to_enrich_only.append((row, contractor, {"summary": stored_summary, "sources": []}))
+                else:
+                    to_research.append((row, contractor))
+
+            logger.info(
+                "Pipeline %s: %d already enriched, %d need research+enrich, %d need enrich only",
+                run_id, already_enriched_count, len(to_research), len(to_enrich_only),
+            )
+
+            # Reflect already-enriched count immediately so the UI doesn't show 0
+            await repo.update_pipeline_progress(run_id, leads_enriched=already_enriched_count)
+
+            # Stage 2: Research only leads that need it
+            research_results: list[dict] = []
+            if to_research:
+                research_contractors = [c for _, c in to_research]
+                research_results = await self._researcher.research_all(research_contractors)
+                for (row, _), research in zip(to_research, research_results):
+                    await repo.update_research(
+                        row["id"], research.get("summary", ""), research.get("sources", [])
+                    )
+
+            # Stage 3: Enrich everything that isn't already done
+            to_enrich_all = (
+                [(row, c, research) for (row, c), research in zip(to_research, research_results)]
+                + to_enrich_only
+            )
+            enriched_count = already_enriched_count + await self._enrich_parallel(
+                repo, to_enrich_all, request.postal_code,
+                run_id=run_id, initial_count=already_enriched_count,
             )
 
             await repo.complete_pipeline_run(run_id, leads_enriched=enriched_count)
 
         except Exception as exc:
             logger.exception("Pipeline run %s failed", run_id)
-            await repo.fail_pipeline_run(run_id, str(exc))
+            error_detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            await repo.fail_pipeline_run(run_id, error_detail)
             raise
 
     async def _enrich_parallel(
         self,
         repo: LeadRepository,
-        lead_rows: list[dict],
-        contractors: list,
-        research_results: list[dict],
+        to_enrich: list[tuple[dict, object, dict]],
         search_postal_code: str,
+        run_id: str = "",
+        initial_count: int = 0,
     ) -> int:
-        """Enrich all leads in parallel up to _ENRICH_CONCURRENCY at a time.
+        """Enrich a list of (row, contractor, research) tuples in parallel.
 
-        Returns the count of successfully enriched leads.
-        Each lead's enrichment result is written to DB immediately on completion.
+        Increments the pipeline_runs.leads_enriched counter in the DB after
+        each individual enrichment so the frontend progress display updates live.
+        Returns the count of newly enriched leads (not including initial_count).
         """
+        if not to_enrich:
+            return 0
+
         sem = asyncio.Semaphore(_ENRICH_CONCURRENCY)
+        count_lock = asyncio.Lock()
+        running_total = [initial_count]
 
         async def enrich_one(row: dict, contractor, research: dict) -> bool:
             async with sem:
@@ -106,6 +146,12 @@ class PipelineService:
                         search_postal_code=search_postal_code,
                     )
                     await repo.update_enrichment(row["id"], insight)
+                    if run_id:
+                        async with count_lock:
+                            running_total[0] += 1
+                            await repo.update_pipeline_progress(
+                                run_id, leads_enriched=running_total[0]
+                            )
                     return True
                 except Exception as exc:
                     logger.exception("Enrichment failed for lead %s", row["id"])
@@ -113,8 +159,7 @@ class PipelineService:
                     return False
 
         results = await asyncio.gather(
-            *[enrich_one(row, contractor, research)
-              for row, contractor, research in zip(lead_rows, contractors, research_results)],
+            *[enrich_one(row, contractor, research) for row, contractor, research in to_enrich],
             return_exceptions=True,
         )
         return sum(1 for r in results if r is True)

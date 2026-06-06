@@ -2,32 +2,37 @@
 
 GAF's contractor locator is a React SPA that fetches data from a Coveo search
 backend (POST *.coveo.com/rest/search/v2).  DOM-based scraping yields 0 cards
-because markup is rendered asynchronously.  Scrolling does not trigger additional
-Coveo batches (GAF paginates via UI buttons, not infinite scroll).
+because markup is rendered asynchronously.
 
 Strategy
 --------
-1. Playwright (headless=False) — needed to bypass Akamai Bot Manager which
-   blocks headless Chromium at HTTP level before any JavaScript runs.
+1. Playwright (headless=False) — needed to bypass Akamai Bot Manager.
    Navigates to the search page and intercepts the first Coveo request,
-   capturing the auth token, full request body (including the geocoded
-   lat/lng for the postal code), and the first 10 results.
+   capturing the auth token, full request body (including geocoded lat/lng),
+   and the first 10 results.
 
-2. httpx pagination — using the captured auth token and request body,
-   makes successive POST requests with increasing `firstResult` offsets
-   until all pages are fetched.  Playwright is closed before this phase
-   so the browser window is open for only ~15 seconds.
+2. httpx pagination — using the captured token and body, successive POST
+   requests fetch remaining pages without a browser.
 
-The lat/lng for the requested postal code is embedded by GAF's frontend into
-the `queryFunctions` array of the Coveo request body.  Capturing it from the
-first browser request ensures correct geocoding without a separate lookup.
+Windows / event-loop fix
+------------------------
+uvicorn on Windows uses SelectorEventLoop, which raises NotImplementedError
+when any code tries to spawn a subprocess (asyncio.create_subprocess_exec).
+async_playwright starts a Node.js subprocess, so it cannot run on the
+SelectorEventLoop directly.
+
+Fix: scrape_contractors dispatches via asyncio.to_thread to a worker thread
+that owns a fresh ProactorEventLoop.  ProactorEventLoop supports subprocess
+creation on Windows.  The main uvicorn loop is never touched.
 """
+import asyncio
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 
 import httpx
-from playwright.sync_api import sync_playwright, Page
+from playwright.async_api import async_playwright
 
 from app.config import ScraperConfig
 from app.models.lead import ContractorRecord
@@ -46,32 +51,17 @@ GAF_PROFILE_URL_TEMPLATE = (
 _COVEO_URL_FRAGMENT = "coveo.com/rest/search"
 
 # Milliseconds to wait after domcontentloaded for React to bootstrap and
-# fire the initial Coveo XHR (empirically determined: ~5–8 seconds needed).
+# fire the initial Coveo XHR (empirically ~5–8 s needed).
 _INITIAL_WAIT_MS = 10_000
 
-# Results per httpx pagination page (Coveo default is 10; 100 is accepted).
+# Results per httpx pagination page (Coveo accepts up to 100).
 _PAGE_SIZE = 100
 
-# Stealth patches injected before every page script so Akamai's bot detection
-# sees a normal browser rather than a headless automation environment.
 _STEALTH_JS = """
-// 1. Remove the primary automation flag
-Object.defineProperty(navigator, 'webdriver', {
-    get: () => undefined,
-    configurable: true,
-});
-
-// 2. Provide a realistic window.chrome object (missing in headless)
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
 if (!window.chrome) {
-    window.chrome = {
-        app: { isInstalled: false },
-        runtime: {},
-        loadTimes: function() {},
-        csi: function() {},
-    };
+    window.chrome = { app: { isInstalled: false }, runtime: {}, loadTimes: function() {}, csi: function() {} };
 }
-
-// 3. Realistic plugin list (headless has 0 plugins)
 Object.defineProperty(navigator, 'plugins', {
     get: () => {
         const arr = [
@@ -79,21 +69,14 @@ Object.defineProperty(navigator, 'plugins', {
             { name: 'Chrome PDF Viewer',   filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
             { name: 'Native Client',       filename: 'internal-nacl-plugin',            description: '' },
         ];
-        arr.item    = (i) => arr[i];
+        arr.item = (i) => arr[i];
         arr.namedItem = (n) => arr.find(p => p.name === n) || null;
         arr.refresh = () => {};
         return arr;
     },
     configurable: true,
 });
-
-// 4. Language list
-Object.defineProperty(navigator, 'languages', {
-    get: () => ['en-US', 'en'],
-    configurable: true,
-});
-
-// 5. Permissions — headless returns 'denied' for notifications
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
 const _origPermQuery = window.navigator.permissions && window.navigator.permissions.query;
 if (_origPermQuery) {
     window.navigator.permissions.query = (params) =>
@@ -101,31 +84,20 @@ if (_origPermQuery) {
             ? Promise.resolve({ state: Notification.permission })
             : _origPermQuery.call(navigator.permissions, params);
 }
-
-// 6. Hardware concurrency — headless often reports 2; real machines report 4–16
-Object.defineProperty(navigator, 'hardwareConcurrency', {
-    get: () => 8,
-    configurable: true,
-});
-
-// 7. Remove CDP / DevTools artefacts left on window
-['__cdc_asdjflasutopfhvcZLmcfl_Array',
- '__cdc_asdjflasutopfhvcZLmcfl_Promise',
- '__cdc_asdjflasutopfhvcZLmcfl_Symbol'].forEach(k => {
+Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
+['__cdc_asdjflasutopfhvcZLmcfl_Array','__cdc_asdjflasutopfhvcZLmcfl_Promise','__cdc_asdjflasutopfhvcZLmcfl_Symbol'].forEach(k => {
     try { delete window[k]; } catch(_) {}
 });
 """
 
 
 def _coerce_str(val) -> str | None:
-    """Coveo facetable fields may arrive as a list or a bare string."""
     if isinstance(val, list):
         return val[0] if val else None
     return val or None
 
 
 def _extract_certifications(raw: dict) -> list[str]:
-    """Merge commercial and residential certification arrays, de-duplicated."""
     commercial = raw.get("gaf_f_contractor_certifications_and_awards_commercial") or []
     residential = raw.get("gaf_f_contractor_certifications_and_awards_residential") or []
     if isinstance(commercial, str):
@@ -142,7 +114,6 @@ def _extract_certifications(raw: dict) -> list[str]:
 
 
 def _map_coveo_result(result: dict, country_code: str) -> ContractorRecord:
-    """Map a single Coveo search result dict to a ContractorRecord."""
     raw = result.get("raw", {})
     name = _coerce_str(raw.get("gaf_navigation_title")) or result.get("title", "Unknown")
     contractor_id = str(raw.get("gaf_contractor_id", "")).strip() or None
@@ -172,15 +143,40 @@ def _map_coveo_result(result: dict, country_code: str) -> ContractorRecord:
 class PlaywrightScraper:
     """Scrapes GAF contractors via Playwright + Coveo API hybrid.
 
-    Phase 1 (Playwright, headless=False): Navigate to the GAF search page to
-    capture the Coveo auth token, geocoded request body, and first 10 results.
-    The browser is closed immediately after Phase 1.
-
-    Phase 2 (httpx): Use the captured token and request body to fetch all
-    remaining pages from the Coveo API directly, without a browser.
+    scrape_contractors is async (called with await from the pipeline) but
+    immediately hands off to a worker thread via asyncio.to_thread.  That
+    thread creates a ProactorEventLoop so async_playwright can spawn the
+    Node.js browser subprocess — something SelectorEventLoop cannot do on
+    Windows.
     """
 
-    def scrape_contractors(self, config: ScraperConfig) -> list[ContractorRecord]:
+    async def scrape_contractors(self, config: ScraperConfig) -> list[ContractorRecord]:
+        """Entry point — dispatches to a ProactorEventLoop thread."""
+        return await asyncio.to_thread(self._run_in_proactor, config)
+
+    # ── ProactorEventLoop bridge ───────────────────────────────────────────
+
+    def _run_in_proactor(self, config: ScraperConfig) -> list[ContractorRecord]:
+        """Run the async scraper inside a fresh ProactorEventLoop.
+
+        Called from asyncio.to_thread so it executes in a worker thread with
+        no pre-existing event loop.  ProactorEventLoop supports subprocess
+        creation on Windows; SelectorEventLoop does not.
+        """
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+        else:
+            loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self._async_scrape(config))
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    # ── Async scrape implementation ────────────────────────────────────────
+
+    async def _async_scrape(self, config: ScraperConfig) -> list[ContractorRecord]:
         url = GAF_COMMERCIAL_URL.format(
             postal_code=config.postal_code,
             country_code=config.country_code,
@@ -201,53 +197,56 @@ class PlaywrightScraper:
                 except Exception:
                     pass
 
-        def on_response(resp) -> None:
+        async def on_response(resp) -> None:
             nonlocal total_count
             if _COVEO_URL_FRAGMENT in resp.url and not first_batch:
                 try:
-                    data = resp.json()
+                    data = await resp.json()
                     first_batch.extend(data.get("results", []))
                     total_count = data.get("totalCount", 0)
                 except Exception:
                     pass
 
-        with sync_playwright() as pw:
-            browser = None
-            page = None
-            try:
-                browser = pw.chromium.launch(
-                    headless=False,
-                    args=["--disable-blink-features=AutomationControlled", "--start-maximized"],
-                )
-                context = browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    viewport={"width": 1280, "height": 800},
-                    locale="en-US",
-                    timezone_id="America/New_York",
-                    extra_http_headers={
-                        "Accept-Language": "en-US,en;q=0.9",
-                        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-                        "sec-ch-ua-mobile": "?0",
-                        "sec-ch-ua-platform": '"Windows"',
-                    },
-                )
-                context.add_init_script(_STEALTH_JS)
-                page = context.new_page()
-                page.on("request", on_request)
-                page.on("response", on_response)
-                page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-                page.wait_for_timeout(_INITIAL_WAIT_MS)
-            except Exception:
-                logger.exception("Playwright phase failed for %s", url)
-            finally:
-                if page is not None:
-                    page.close()
-                if browser is not None:
-                    browser.close()
+        browser = None
+        page = None
+        try:
+            async with async_playwright() as pw:
+                try:
+                    browser = await pw.chromium.launch(
+                        headless=False,
+                        args=["--disable-blink-features=AutomationControlled", "--start-maximized"],
+                    )
+                    context = await browser.new_context(
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"
+                        ),
+                        viewport={"width": 1280, "height": 800},
+                        locale="en-US",
+                        timezone_id="America/New_York",
+                        extra_http_headers={
+                            "Accept-Language": "en-US,en;q=0.9",
+                            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                            "sec-ch-ua-mobile": "?0",
+                            "sec-ch-ua-platform": '"Windows"',
+                        },
+                    )
+                    await context.add_init_script(_STEALTH_JS)
+                    page = await context.new_page()
+                    page.on("request", on_request)
+                    page.on("response", on_response)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                    await page.wait_for_timeout(_INITIAL_WAIT_MS)
+                except Exception:
+                    logger.exception("Playwright phase failed for %s", url)
+                finally:
+                    if page is not None:
+                        await page.close()
+                    if browser is not None:
+                        await browser.close()
+        except Exception:
+            logger.exception("Playwright initialisation failed for %s", url)
 
         if not first_batch:
             logger.warning("No Coveo data captured for %s", url)
@@ -255,9 +254,8 @@ class PlaywrightScraper:
 
         all_results = list(first_batch)
 
-        # Fetch remaining pages via httpx if there are more results.
         if coveo_token and coveo_request_body and total_count > len(first_batch):
-            all_results += self._paginate_coveo(
+            all_results += await self._paginate_coveo(
                 coveo_token, coveo_request_body, total_count, start=len(first_batch)
             )
 
@@ -276,7 +274,7 @@ class PlaywrightScraper:
         logger.info("PlaywrightScraper extracted %d contractors", len(contractors))
         return contractors
 
-    def _paginate_coveo(
+    async def _paginate_coveo(
         self,
         token: str,
         base_body: dict,
@@ -294,27 +292,31 @@ class PlaywrightScraper:
             "Content-Type": "application/json",
         }
         first_result = start
-        while first_result < total_count:
-            body = {
-                **base_body,
-                "firstResult": first_result,
-                "numberOfResults": _PAGE_SIZE,
-                "analytics": {
-                    **base_body.get("analytics", {}),
-                    "clientTimestamp": datetime.now(timezone.utc).isoformat(),
-                },
-            }
-            try:
-                resp = httpx.post(coveo_url, json=body, headers=headers, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
-                batch = data.get("results", [])
-                if not batch:
+        async with httpx.AsyncClient() as client:
+            while first_result < total_count:
+                body = {
+                    **base_body,
+                    "firstResult": first_result,
+                    "numberOfResults": _PAGE_SIZE,
+                    "analytics": {
+                        **base_body.get("analytics", {}),
+                        "clientTimestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+                try:
+                    resp = await client.post(coveo_url, json=body, headers=headers, timeout=30)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    batch = data.get("results", [])
+                    if not batch:
+                        break
+                    extra.extend(batch)
+                    first_result += len(batch)
+                    logger.debug(
+                        "Coveo page firstResult=%d → +%d results",
+                        first_result - len(batch), len(batch),
+                    )
+                except Exception:
+                    logger.exception("httpx Coveo pagination failed at firstResult=%d", first_result)
                     break
-                extra.extend(batch)
-                first_result += len(batch)
-                logger.debug("Coveo page firstResult=%d → +%d results", first_result - len(batch), len(batch))
-            except Exception:
-                logger.exception("httpx Coveo pagination failed at firstResult=%d", first_result)
-                break
         return extra

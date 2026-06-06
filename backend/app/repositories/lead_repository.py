@@ -5,8 +5,11 @@ or instantiate the Supabase client directly. The interface follows the standard
 repository pattern: upsert / get / update / mark-failed for leads, plus a set
 of pipeline-run tracking helpers used by PipelineService.
 """
+import logging
 from datetime import datetime, timezone
 from app.models.lead import ContractorRecord, LeadInsight
+
+logger = logging.getLogger(__name__)
 
 
 class LeadRepository:
@@ -56,34 +59,61 @@ class LeadRepository:
             .upsert(row, on_conflict="gaf_contractor_id")
             .execute()
         )
-        return result.data[0]
-
-    async def get_all_leads(self, page: int = 1, limit: int = 12) -> dict:
-        """Return a page of leads ordered by priority_index descending.
-
-        Uses Supabase count="exact" to fetch total row count in one round-trip.
-        Falls back to ordering by lead_score when priority_index column is missing.
-        """
-        offset = (page - 1) * limit
-        try:
-            result = (
+        if result.data:
+            return result.data[0]
+        # Supabase may return empty data when the upsert resolved to a no-op update.
+        # Fall back to a SELECT only when gaf_contractor_id is available for lookup.
+        if contractor.gaf_contractor_id:
+            select = (
                 await self._client.table("leads")
-                .select("*", count="exact")
-                .order("priority_index", desc=True, nullsfirst=False)
-                .range(offset, offset + limit - 1)
+                .select("*")
+                .eq("gaf_contractor_id", contractor.gaf_contractor_id)
+                .single()
                 .execute()
             )
-        except Exception:
-            try:
-                result = (
-                    await self._client.table("leads")
-                    .select("*", count="exact")
-                    .order("lead_score", desc=True)
-                    .range(offset, offset + limit - 1)
-                    .execute()
-                )
-            except Exception as exc:
-                raise RuntimeError(f"Failed to fetch leads (page={page}, limit={limit})") from exc
+            return select.data
+        raise RuntimeError(
+            f"upsert returned no data and contractor has no gaf_contractor_id: {contractor.company_name}"
+        )
+
+    async def get_all_leads(
+        self,
+        page: int = 1,
+        limit: int = 12,
+        score_tier: str | None = None,
+        sort_by: str | None = None,
+    ) -> dict:
+        """Return a filtered, sorted page of leads with an accurate total count.
+
+        score_tier filters by lead_score range server-side so pagination totals
+        reflect only the matching records — not the full table.
+        sort_by controls ordering: 'score_desc' (default), 'name_asc', 'recently_enriched'.
+        """
+        offset = (page - 1) * limit
+        query = self._client.table("leads").select("*", count="exact")
+
+        if score_tier == "high":
+            query = query.gte("lead_score", 8).lte("lead_score", 10)
+        elif score_tier == "medium":
+            query = query.gte("lead_score", 5).lte("lead_score", 7)
+        elif score_tier == "low":
+            query = query.gte("lead_score", 1).lte("lead_score", 4)
+
+        if sort_by == "name_asc":
+            query = query.order("company_name", desc=False)
+        elif sort_by == "recently_enriched":
+            query = query.order("enriched_at", desc=True, nullsfirst=False)
+        else:
+            query = query.order("priority_index", desc=True, nullsfirst=False)
+
+        try:
+            result = await query.range(offset, offset + limit - 1).execute()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to fetch leads (page={page}, limit={limit}, "
+                f"score_tier={score_tier}, sort_by={sort_by})"
+            ) from exc
+
         return {
             "leads": result.data or [],
             "total": result.count or 0,
@@ -102,10 +132,10 @@ class LeadRepository:
         )
         return result.data
 
-    async def update_research(self, lead_id: str, summary: str, sources: list[str]) -> dict:
+    async def update_research(self, lead_id: str, summary: str, sources: list[str]) -> None:
         """Persist Perplexity research results and advance the lead status to 'researched'."""
-        result = (
-            await self._client.table("leads")
+        await (
+            self._client.table("leads")
             .update({
                 "research_summary": summary,
                 "research_sources": sources,
@@ -115,12 +145,11 @@ class LeadRepository:
             .eq("id", lead_id)
             .execute()
         )
-        return result.data[0]
 
-    async def update_enrichment(self, lead_id: str, insight: LeadInsight) -> dict:
+    async def update_enrichment(self, lead_id: str, insight: LeadInsight) -> None:
         """Persist Claude AI enrichment output and advance the lead status to 'enriched'."""
-        result = (
-            await self._client.table("leads")
+        await (
+            self._client.table("leads")
             .update({
                 "lead_score":               insight.lead_score,
                 "score_rationale":          insight.score_rationale,
@@ -138,7 +167,6 @@ class LeadRepository:
             .eq("id", lead_id)
             .execute()
         )
-        return result.data[0]
 
     async def mark_lead_failed(self, lead_id: str, error: str) -> None:
         """Record an enrichment failure. Truncates the error message to 500 characters to fit the column."""
@@ -150,6 +178,39 @@ class LeadRepository:
         )
 
     # ── Pipeline run tracking ──────────────────────────────────────────────
+
+    async def interrupt_stale_runs(self) -> int:
+        """Mark any pipeline_runs stuck in 'running' as failed with an interrupted message.
+
+        Called once at server startup so runs orphaned by a previous server
+        restart are never left displayed as 'running' forever in the UI.
+        Returns the number of rows updated.
+        """
+        result = (
+            await self._client.table("pipeline_runs")
+            .update({
+                "status": "failed",
+                "error_message": "Server restarted — pipeline was interrupted. Re-run to resume (already-enriched leads will be skipped).",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("status", "running")
+            .execute()
+        )
+        count = len(result.data) if result.data else 0
+        if count:
+            logger.warning("Marked %d stale pipeline run(s) as failed on startup", count)
+        return count
+
+    async def get_latest_pipeline_run(self) -> dict | None:
+        """Return the most recent pipeline_runs row regardless of status."""
+        result = (
+            await self._client.table("pipeline_runs")
+            .select("*")
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
 
     async def create_pipeline_run(self, postal_code: str, country_code: str, distance: int) -> str:
         """Insert a new pipeline_runs row and return the generated UUID."""
