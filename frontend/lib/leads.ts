@@ -1,22 +1,19 @@
 /**
- * Cached leads fetch using Next.js unstable_cache.
+ * Server-side leads fetch — no caching layer.
  *
- * During a pipeline run, PipelineControls calls revalidateLeads() (in actions.ts)
- * before every router.refresh() to bust the cache and ensure fresh data.
- * After the run completes, the cache is left populated so subsequent page
- * loads are served instantly without a Supabase round-trip.
- *
- * Each page/limit combination gets its own cache entry; all share the
- * 'leads-list' tag so a single revalidateTag() invalidates all of them.
+ * getLeads uses cache: 'no-store' so every call goes straight to the backend.
+ * This ensures that router.refresh() (called by PipelineControls every 3 s
+ * during a pipeline run) always delivers fresh data — new scraped cards appear
+ * and the total count updates without needing cache invalidation.
  */
-import { unstable_cache } from 'next/cache';
 import { getLeads } from './api';
 import type { PaginatedLeadsResponse } from './types';
 
-export function getCachedLeads(page: number, limit: number): Promise<PaginatedLeadsResponse> {
-  return unstable_cache(
-    () => getLeads(page, limit),
-    ['leads-list', String(page), String(limit)],
-    { tags: ['leads-list'] }
-  )();
+export function getCachedLeads(
+  page: number,
+  limit: number,
+  scoreTier?: string,
+  sortBy?: string,
+): Promise<PaginatedLeadsResponse> {
+  return getLeads(page, limit, scoreTier, sortBy);
 }

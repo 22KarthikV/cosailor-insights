@@ -15,17 +15,24 @@ import type { Lead } from '@/lib/types';
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 
+const VALID_SCORE_TIERS = ['all', 'high', 'medium', 'low'] as const;
+type ScoreTier = (typeof VALID_SCORE_TIERS)[number];
+const VALID_SORT_OPTIONS = ['score_desc', 'name_asc', 'recently_enriched'] as const;
+type SortOption = (typeof VALID_SORT_OPTIONS)[number];
+
 interface LeadsSectionProps {
   page: number;
   limit: number;
+  scoreTier: ScoreTier;
+  sortBy: SortOption;
 }
 
-async function LeadsSection({ page, limit }: LeadsSectionProps) {
+async function LeadsSection({ page, limit, scoreTier, sortBy }: LeadsSectionProps) {
   let leads: Lead[] = [];
   let total = 0;
   let fetchError = false;
   try {
-    const result = await getCachedLeads(page, limit);
+    const result = await getCachedLeads(page, limit, scoreTier, sortBy);
     leads = result.leads;
     total = result.total;
   } catch (err) {
@@ -39,13 +46,22 @@ async function LeadsSection({ page, limit }: LeadsSectionProps) {
       </p>
     );
   }
-  return <LeadsGridClient leads={leads} page={page} limit={limit} total={total} />;
+  return (
+    <LeadsGridClient
+      leads={leads}
+      page={page}
+      limit={limit}
+      total={total}
+      scoreTier={scoreTier}
+      sortBy={sortBy}
+    />
+  );
 }
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; limit?: string }>;
+  searchParams: Promise<{ page?: string; limit?: string; score_tier?: string; sort_by?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? '1', 10) || 1);
@@ -53,6 +69,12 @@ export default async function DashboardPage({
   const limit = PAGE_SIZE_OPTIONS.includes(rawLimit as (typeof PAGE_SIZE_OPTIONS)[number])
     ? rawLimit
     : 12;
+  const scoreTier = (VALID_SCORE_TIERS.includes(params.score_tier as ScoreTier)
+    ? params.score_tier
+    : 'all') as ScoreTier;
+  const sortBy = (VALID_SORT_OPTIONS.includes(params.sort_by as SortOption)
+    ? params.sort_by
+    : 'score_desc') as SortOption;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -93,7 +115,7 @@ export default async function DashboardPage({
           </div>
         }
       >
-        <LeadsSection page={page} limit={limit} />
+        <LeadsSection page={page} limit={limit} scoreTier={scoreTier} sortBy={sortBy} />
       </Suspense>
     </div>
   );

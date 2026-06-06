@@ -1,24 +1,27 @@
 'use client';
 
 /**
- * LeadsGridClient — interactive leads grid with filtering, sorting, and real-time updates.
+ * LeadsGridClient — interactive leads grid with URL-driven filtering, sorting,
+ * and real-time updates.
  *
- * This is the only client component on the dashboard. It receives an initial
- * leads array from the Server Component (LeadsSection in page.tsx) and keeps
- * it live via useLeadsRealtime (Supabase Postgres change subscriptions).
+ * Filtering and sorting are now server-side: filter/sort controls push new URL
+ * params, which re-runs the Server Component (LeadsSection) so the backend
+ * returns an accurate filtered total and the correct page of results.
+ * No client-side filter/sort logic remains here.
  *
- * Sub-components are extracted to keep the root component under 50 lines:
+ * Sub-components:
  *   StatChip          — single statistic tile
- *   StatsBar          — row of StatChips (total, avg score, enriched count)
- *   LeadFilterControls — score-tier filter buttons and sort selector
+ *   StatsBar          — row of StatChips (page count, avg score, enriched count)
+ *   LeadFilterControls — score-tier filter buttons and sort selector (URL-driven)
+ *   PaginationControls — prev/next/page-size (preserves score_tier & sort_by)
  */
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { LeadCard } from './LeadCard';
 import type { Lead } from '@/lib/types';
 import { useLeadsRealtime } from '@/hooks/useLeadsRealtime';
 
-type ScoreFilter = 'all' | 'high' | 'medium' | 'low';
+type ScoreTier = 'all' | 'high' | 'medium' | 'low';
 type SortOption = 'score_desc' | 'name_asc' | 'recently_enriched';
 
 interface LeadsGridClientProps {
@@ -26,6 +29,8 @@ interface LeadsGridClientProps {
   page: number;
   limit: number;
   total: number;
+  scoreTier: ScoreTier;
+  sortBy: SortOption;
 }
 
 interface StatChipProps {
@@ -33,7 +38,6 @@ interface StatChipProps {
   value: string | number;
 }
 
-/** A single labelled statistic tile shown in the stats bar. */
 function StatChip({ label, value }: StatChipProps) {
   return (
     <div className="rounded-lg border bg-gray-50 px-4 py-2 flex flex-col gap-0.5 min-w-25">
@@ -43,9 +47,7 @@ function StatChip({ label, value }: StatChipProps) {
   );
 }
 
-/** Derive summary statistics from the current leads array. */
 function computeStats(leads: Lead[]) {
-  const total = leads.length;
   const enrichedLeads = leads.filter((l) => l.status === 'enriched');
   const enrichedCount = enrichedLeads.length;
   const scoredLeads = leads.filter((l) => l.status === 'enriched' && l.lead_score !== null);
@@ -53,45 +55,26 @@ function computeStats(leads: Lead[]) {
     scoredLeads.length > 0
       ? scoredLeads.reduce((sum, l) => sum + (l.lead_score as number), 0) / scoredLeads.length
       : null;
-
-  return { total, enrichedCount, avgScore };
+  return { enrichedCount, avgScore };
 }
 
-/** Filter leads by score tier. Leads without a score are excluded from tier-specific filters. */
-function filterLeads(leads: Lead[], filter: ScoreFilter): Lead[] {
-  if (filter === 'all') return leads;
-  return leads.filter((l) => {
-    if (l.lead_score === null) return false;
-    if (filter === 'high') return l.lead_score >= 8 && l.lead_score <= 10;
-    if (filter === 'medium') return l.lead_score >= 5 && l.lead_score <= 7;
-    if (filter === 'low') return l.lead_score >= 0 && l.lead_score <= 4;
-    return true;
-  });
+interface StatsBarProps {
+  pageCount: number;
+  enrichedCount: number;
+  avgScore: string;
 }
 
-/** Sort leads without mutating the input array. */
-function sortLeads(leads: Lead[], sort: SortOption): Lead[] {
-  return [...leads].sort((a, b) => {
-    if (sort === 'score_desc') {
-      // Leads with no score sort to the bottom
-      const aScore = a.lead_score ?? -1;
-      const bScore = b.lead_score ?? -1;
-      return bScore - aScore;
-    }
-    if (sort === 'name_asc') {
-      return a.company_name.localeCompare(b.company_name);
-    }
-    if (sort === 'recently_enriched') {
-      // Unenriched leads (enriched_at = null) sort to the bottom
-      const aTime = a.enriched_at ? new Date(a.enriched_at).getTime() : 0;
-      const bTime = b.enriched_at ? new Date(b.enriched_at).getTime() : 0;
-      return bTime - aTime;
-    }
-    return 0;
-  });
+function StatsBar({ pageCount, enrichedCount, avgScore }: StatsBarProps): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap gap-3">
+      <StatChip label="This Page" value={pageCount} />
+      <StatChip label="Avg Score" value={avgScore} />
+      <StatChip label="Enriched" value={`${enrichedCount} / ${pageCount}`} />
+    </div>
+  );
 }
 
-const SCORE_FILTER_OPTIONS: { value: ScoreFilter; label: string }[] = [
+const SCORE_FILTER_OPTIONS: { value: ScoreTier; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'high', label: 'High (8-10)' },
   { value: 'medium', label: 'Medium (5-7)' },
@@ -104,40 +87,23 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: 'recently_enriched', label: 'Recently Enriched' },
 ];
 
-interface StatsBarProps {
-  total: number;
-  enrichedCount: number;
-  avgScore: string;
-}
-
-function StatsBar({ total, enrichedCount, avgScore }: StatsBarProps): React.JSX.Element {
-  return (
-    <div className="flex flex-wrap gap-3">
-      <StatChip label="This Page" value={total} />
-      <StatChip label="Avg Score" value={avgScore} />
-      <StatChip label="Enriched" value={`${enrichedCount} / ${total}`} />
-    </div>
-  );
-}
-
 interface LeadFilterControlsProps {
-  scoreFilter: ScoreFilter;
-  sortOption: SortOption;
-  resultCount: number;
-  onFilterChange: (f: ScoreFilter) => void;
+  scoreTier: ScoreTier;
+  sortBy: SortOption;
+  filteredTotal: number;
+  onFilterChange: (f: ScoreTier) => void;
   onSortChange: (s: SortOption) => void;
 }
 
 function LeadFilterControls({
-  scoreFilter,
-  sortOption,
-  resultCount,
+  scoreTier,
+  sortBy,
+  filteredTotal,
   onFilterChange,
   onSortChange,
 }: LeadFilterControlsProps): React.JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      {/* Segmented score-tier filter */}
       <div
         className="flex items-center gap-0 rounded border border-gray-200 overflow-hidden"
         role="group"
@@ -150,11 +116,11 @@ function LeadFilterControls({
             onClick={() => onFilterChange(opt.value)}
             className={
               'px-3 py-1 text-xs border-r border-gray-200 last:border-r-0 transition-colors ' +
-              (scoreFilter === opt.value
+              (scoreTier === opt.value
                 ? 'bg-blue-600 text-white font-medium'
                 : 'bg-white text-gray-600 hover:bg-gray-100')
             }
-            aria-pressed={scoreFilter === opt.value}
+            aria-pressed={scoreTier === opt.value}
           >
             {opt.label}
           </button>
@@ -162,7 +128,7 @@ function LeadFilterControls({
       </div>
 
       <select
-        value={sortOption}
+        value={sortBy}
         onChange={(e) => onSortChange(e.target.value as SortOption)}
         className="border border-gray-200 rounded px-3 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
         aria-label="Sort leads"
@@ -174,10 +140,9 @@ function LeadFilterControls({
         ))}
       </select>
 
-      {/* Result count only shown when a filter is active */}
-      {scoreFilter !== 'all' && (
+      {scoreTier !== 'all' && (
         <span className="text-xs text-gray-400">
-          {resultCount} result{resultCount !== 1 ? 's' : ''}
+          {filteredTotal} result{filteredTotal !== 1 ? 's' : ''}
         </span>
       )}
     </div>
@@ -190,9 +155,11 @@ interface PaginationControlsProps {
   page: number;
   limit: number;
   total: number;
+  scoreTier: ScoreTier;
+  sortBy: SortOption;
 }
 
-function PaginationControls({ page, limit, total }: PaginationControlsProps): React.JSX.Element {
+function PaginationControls({ page, limit, total, scoreTier, sortBy }: PaginationControlsProps): React.JSX.Element {
   const router = useRouter();
   const totalPages = Math.ceil(total / limit);
   const startItem = total === 0 ? 0 : (page - 1) * limit + 1;
@@ -202,6 +169,8 @@ function PaginationControls({ page, limit, total }: PaginationControlsProps): Re
     const params = new URLSearchParams();
     params.set('page', String(newPage));
     params.set('limit', String(newLimit));
+    if (scoreTier !== 'all') params.set('score_tier', scoreTier);
+    if (sortBy !== 'score_desc') params.set('sort_by', sortBy);
     router.push(`/?${params.toString()}`);
   };
 
@@ -252,19 +221,38 @@ function PaginationControls({ page, limit, total }: PaginationControlsProps): Re
   );
 }
 
-export function LeadsGridClient({ leads: initialLeads, page, limit, total }: LeadsGridClientProps): React.JSX.Element {
-  // Merge real-time Supabase updates on top of the server-fetched initial state
-  const leads = useLeadsRealtime(initialLeads)
-  const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
-  const [sortOption, setSortOption] = useState<SortOption>('score_desc');
+export function LeadsGridClient({
+  leads: initialLeads,
+  page,
+  limit,
+  total,
+  scoreTier,
+  sortBy,
+}: LeadsGridClientProps): React.JSX.Element {
+  const router = useRouter();
+  const leads = useLeadsRealtime(initialLeads, page, limit, scoreTier, sortBy);
 
-  const { total: pageTotal, enrichedCount, avgScore } = useMemo(() => computeStats(leads), [leads]);
-  const displayedLeads = useMemo(
-    () => sortLeads(filterLeads(leads, scoreFilter), sortOption),
-    [leads, scoreFilter, sortOption]
-  );
+  const { enrichedCount, avgScore } = useMemo(() => computeStats(leads), [leads]);
 
-  if (leads.length === 0) {
+  const pushFilter = (f: ScoreTier) => {
+    const params = new URLSearchParams();
+    params.set('page', '1');
+    params.set('limit', String(limit));
+    if (f !== 'all') params.set('score_tier', f);
+    if (sortBy !== 'score_desc') params.set('sort_by', sortBy);
+    router.push(`/?${params.toString()}`);
+  };
+
+  const pushSort = (s: SortOption) => {
+    const params = new URLSearchParams();
+    params.set('page', '1');
+    params.set('limit', String(limit));
+    if (scoreTier !== 'all') params.set('score_tier', scoreTier);
+    if (s !== 'score_desc') params.set('sort_by', s);
+    router.push(`/?${params.toString()}`);
+  };
+
+  if (scoreTier === 'all' && total === 0) {
     return (
       <div className="text-center py-16 text-gray-500">
         <div className="text-5xl mb-4">📋</div>
@@ -279,35 +267,41 @@ export function LeadsGridClient({ leads: initialLeads, page, limit, total }: Lea
   return (
     <div className="space-y-4">
       <StatsBar
-        total={pageTotal}
+        pageCount={leads.length}
         enrichedCount={enrichedCount}
         avgScore={avgScore !== null ? avgScore.toFixed(1) : '—'}
       />
       <p className="text-xs text-gray-400 mb-2">{total} contractors total</p>
       <LeadFilterControls
-        scoreFilter={scoreFilter}
-        sortOption={sortOption}
-        resultCount={displayedLeads.length}
-        onFilterChange={setScoreFilter}
-        onSortChange={setSortOption}
+        scoreTier={scoreTier}
+        sortBy={sortBy}
+        filteredTotal={total}
+        onFilterChange={pushFilter}
+        onSortChange={pushSort}
       />
-      {displayedLeads.length === 0 ? (
+      {leads.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500 text-sm">No leads match the selected filter.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {displayedLeads.map((lead) => (
+          {leads.map((lead) => (
             <div
               key={lead.id}
               className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-full"
             >
-              <LeadCard lead={lead} />
+              <LeadCard lead={lead} page={page} limit={limit} />
             </div>
           ))}
         </div>
       )}
-      <PaginationControls page={page} limit={limit} total={total} />
+      <PaginationControls
+        page={page}
+        limit={limit}
+        total={total}
+        scoreTier={scoreTier}
+        sortBy={sortBy}
+      />
     </div>
   );
 }

@@ -9,11 +9,18 @@ import type { Lead, PaginatedLeadsResponse, PipelineRunResponse, PipelineStatusR
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-/** Fetch a paginated page of leads ordered by priority_index descending. */
-export async function getLeads(page: number = 1, limit: number = 12): Promise<PaginatedLeadsResponse> {
-  const res = await fetch(`${API_BASE}/api/leads/?page=${page}&limit=${limit}`, {
-    cache: 'no-store',
-  });
+/** Fetch a filtered, sorted page of leads. Filtering and sorting are server-side
+ *  so the returned total reflects only matching records — pagination is accurate. */
+export async function getLeads(
+  page: number = 1,
+  limit: number = 12,
+  scoreTier?: string,
+  sortBy?: string,
+): Promise<PaginatedLeadsResponse> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (scoreTier && scoreTier !== 'all') params.set('score_tier', scoreTier);
+  if (sortBy && sortBy !== 'score_desc') params.set('sort_by', sortBy);
+  const res = await fetch(`${API_BASE}/api/leads/?${params.toString()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch leads: ${res.status}`);
   return res.json();
 }
@@ -48,5 +55,16 @@ export async function triggerPipeline(
 export async function getPipelineStatus(runId: string): Promise<PipelineStatusResponse> {
   const res = await fetch(`${API_BASE}/api/pipeline/status/${runId}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Pipeline run not found: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Fetch the most recent pipeline run (any status).
+ * Used on mount by PipelineControls to restore state after a page refresh.
+ * Throws when no runs exist (404).
+ */
+export async function getLatestPipelineRun(): Promise<PipelineStatusResponse> {
+  const res = await fetch(`${API_BASE}/api/pipeline/latest`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`No pipeline runs: ${res.status}`);
   return res.json();
 }
