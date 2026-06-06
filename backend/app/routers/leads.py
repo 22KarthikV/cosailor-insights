@@ -5,9 +5,8 @@ created per request — there is no shared connection pool because the
 Supabase Python client manages its own HTTP sessions internally.
 """
 from fastapi import APIRouter, HTTPException, Query
-from supabase import acreate_client
 
-from app.config import settings
+from app.database import get_supabase
 from app.models.lead import LeadResponse, PaginatedLeadsResponse
 from app.repositories.lead_repository import LeadRepository
 
@@ -15,20 +14,21 @@ router = APIRouter()
 
 
 async def _get_repo() -> LeadRepository:
-    """Create a per-request Supabase async client and wrap it in the repository."""
-    client = await acreate_client(settings.supabase_url, settings.supabase_key)
-    return LeadRepository(client)
+    """Return a repository backed by the shared singleton Supabase client."""
+    return LeadRepository(await get_supabase())
 
 
 @router.get("/", response_model=PaginatedLeadsResponse)
 async def list_leads(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    score_tier: str | None = Query(default=None, pattern="^(high|medium|low)$"),
+    sort_by: str | None = Query(default=None, pattern="^(score_desc|name_asc|recently_enriched)$"),
 ):
-    """Return a page of leads sorted by priority_index descending."""
+    """Return a filtered, sorted page of leads with an accurate total for pagination."""
     repo = await _get_repo()
     try:
-        result = await repo.get_all_leads(page=page, limit=limit)
+        result = await repo.get_all_leads(page=page, limit=limit, score_tier=score_tier, sort_by=sort_by)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail="Unable to retrieve leads at this time") from exc
     return result
