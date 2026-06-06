@@ -14,7 +14,9 @@ each stage so the frontend can display live progress.
 import asyncio
 import logging
 
-from app.config import ScraperConfig
+from supabase import acreate_client
+
+from app.config import ScraperConfig, settings
 from app.models.lead import PipelineRunRequest
 from app.repositories.lead_repository import LeadRepository
 from app.services.enricher import LeadEnricher
@@ -28,8 +30,7 @@ _ENRICH_CONCURRENCY = 5
 class PipelineService:
     """Coordinates the end-to-end lead enrichment pipeline."""
 
-    def __init__(self, repo: LeadRepository, scraper, researcher: ContractorResearcher, enricher: LeadEnricher):
-        self._repo = repo
+    def __init__(self, scraper, researcher: ContractorResearcher, enricher: LeadEnricher):
         self._scraper = scraper
         self._researcher = researcher
         self._enricher = enricher
@@ -37,10 +38,16 @@ class PipelineService:
     async def execute(self, run_id: str, request: PipelineRunRequest) -> None:
         """Run all three pipeline stages for a single scrape request.
 
+        A fresh Supabase client is created here (not reused from the router)
+        so the background task owns its own httpx connection lifetime.
         Marks the pipeline run as failed in the database if any unrecoverable
         error occurs before enrichment finishes, then re-raises so the
         BackgroundTask framework can log the full traceback.
         """
+        # Own the Supabase connection — never share the router's client across
+        # the request/background-task boundary (httpx session lifecycle mismatch).
+        client = await acreate_client(settings.supabase_url, settings.supabase_key)
+        repo = LeadRepository(client)
         try:
             config = ScraperConfig(
                 postal_code=request.postal_code,
@@ -51,35 +58,36 @@ class PipelineService:
 
             # Stage 1: Scrape contractors from the GAF directory
             contractors = await asyncio.to_thread(self._scraper.scrape_contractors, config)
-            await self._repo.update_pipeline_progress(run_id, leads_scraped=len(contractors))
+            await repo.update_pipeline_progress(run_id, leads_scraped=len(contractors))
 
-            lead_rows = [await self._repo.upsert_contractor(c) for c in contractors]
+            lead_rows = [await repo.upsert_contractor(c) for c in contractors]
 
             # Stage 2: Research all contractors via Perplexity
             research_results = await self._researcher.research_all(contractors)
             for row, research in zip(lead_rows, research_results):
-                await self._repo.update_research(
+                await repo.update_research(
                     row["id"], research.get("summary", ""), research.get("sources", [])
                 )
 
             # Stage 3: Enrich in parallel with a concurrency cap
             enriched_count = await self._enrich_parallel(
-                lead_rows, contractors, research_results, request.postal_code, run_id
+                repo, lead_rows, contractors, research_results, request.postal_code
             )
 
-            await self._repo.complete_pipeline_run(run_id, leads_enriched=enriched_count)
+            await repo.complete_pipeline_run(run_id, leads_enriched=enriched_count)
 
         except Exception as exc:
-            await self._repo.fail_pipeline_run(run_id, str(exc))
+            logger.exception("Pipeline run %s failed", run_id)
+            await repo.fail_pipeline_run(run_id, str(exc))
             raise
 
     async def _enrich_parallel(
         self,
+        repo: LeadRepository,
         lead_rows: list[dict],
         contractors: list,
         research_results: list[dict],
         search_postal_code: str,
-        run_id: str,
     ) -> int:
         """Enrich all leads in parallel up to _ENRICH_CONCURRENCY at a time.
 
@@ -97,11 +105,11 @@ class PipelineService:
                         research,
                         search_postal_code=search_postal_code,
                     )
-                    await self._repo.update_enrichment(row["id"], insight)
+                    await repo.update_enrichment(row["id"], insight)
                     return True
                 except Exception as exc:
                     logger.exception("Enrichment failed for lead %s", row["id"])
-                    await self._repo.mark_lead_failed(row["id"], str(exc))
+                    await repo.mark_lead_failed(row["id"], str(exc))
                     return False
 
         results = await asyncio.gather(

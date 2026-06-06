@@ -5,8 +5,25 @@ researcher, and enricher; per-lead failure isolation; and accurate completion
 counts written back to the pipeline_runs table.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+
+def _make_pipeline_service(mock_repo, mock_scraper, mock_researcher, mock_enricher):
+    """Build a PipelineService whose execute() uses mock_repo instead of a real Supabase client."""
+    from app.services.pipeline import PipelineService
+
+    service = PipelineService(
+        scraper=mock_scraper,
+        researcher=mock_researcher,
+        enricher=mock_enricher,
+    )
+    # Patch acreate_client + LeadRepository so execute() owns no real connection
+    service._acreate_patcher = patch("app.services.pipeline.acreate_client", new_callable=AsyncMock)
+    service._repo_patcher = patch("app.services.pipeline.LeadRepository", return_value=mock_repo)
+    service._acreate_patcher.start()
+    service._repo_patcher.start()
+    return service
 
 
 @pytest.fixture
@@ -50,17 +67,15 @@ async def test_pipeline_execute_stores_all_enriched_leads(sample_contractor, sam
     mock_enricher = MagicMock()
     mock_enricher.enrich.return_value = _insight
 
-    service = PipelineService(
-        repo=mock_repo,
-        scraper=mock_scraper,
-        researcher=mock_researcher,
-        enricher=mock_enricher,
-    )
-
-    await service.execute(
-        run_id=run_id,
-        request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
-    )
+    service = _make_pipeline_service(mock_repo, mock_scraper, mock_researcher, mock_enricher)
+    try:
+        await service.execute(
+            run_id=run_id,
+            request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
+        )
+    finally:
+        service._acreate_patcher.stop()
+        service._repo_patcher.stop()
 
     mock_scraper.scrape_contractors.assert_called_once()
     mock_researcher.research_all.assert_called_once()
@@ -95,17 +110,15 @@ async def test_pipeline_enriches_multiple_leads(sample_contractor, sample_lead_r
     mock_enricher = MagicMock()
     mock_enricher.enrich.return_value = _insight
 
-    service = PipelineService(
-        repo=mock_repo,
-        scraper=mock_scraper,
-        researcher=mock_researcher,
-        enricher=mock_enricher,
-    )
-
-    await service.execute(
-        run_id="run-123",
-        request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
-    )
+    service = _make_pipeline_service(mock_repo, mock_scraper, mock_researcher, mock_enricher)
+    try:
+        await service.execute(
+            run_id="run-123",
+            request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
+        )
+    finally:
+        service._acreate_patcher.stop()
+        service._repo_patcher.stop()
 
     assert mock_enricher.enrich.call_count == 3
     assert mock_repo.update_enrichment.call_count == 3
@@ -137,17 +150,15 @@ async def test_pipeline_continues_when_one_enrichment_fails(sample_contractor, s
     mock_enricher = MagicMock()
     mock_enricher.enrich.side_effect = [RuntimeError("API timeout"), _insight]
 
-    service = PipelineService(
-        repo=mock_repo,
-        scraper=mock_scraper,
-        researcher=mock_researcher,
-        enricher=mock_enricher,
-    )
-
-    await service.execute(
-        run_id="run-fail",
-        request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
-    )
+    service = _make_pipeline_service(mock_repo, mock_scraper, mock_researcher, mock_enricher)
+    try:
+        await service.execute(
+            run_id="run-fail",
+            request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None),
+        )
+    finally:
+        service._acreate_patcher.stop()
+        service._repo_patcher.stop()
 
     assert mock_enricher.enrich.call_count == 2
     mock_repo.mark_lead_failed.assert_called_once()
@@ -186,17 +197,15 @@ async def test_pipeline_uses_semaphore_for_parallel_enrichment(sample_contractor
     mock_enricher = MagicMock()
     mock_enricher.enrich.return_value = _insight
 
-    service = PipelineService(
-        repo=mock_repo,
-        scraper=mock_scraper,
-        researcher=mock_researcher,
-        enricher=mock_enricher,
-    )
-
-    await service.execute(
-        run_id="run-parallel",
-        request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None, scraper="playwright"),
-    )
+    service = _make_pipeline_service(mock_repo, mock_scraper, mock_researcher, mock_enricher)
+    try:
+        await service.execute(
+            run_id="run-parallel",
+            request=MagicMock(postal_code="10013", country_code="us", distance=25, limit=None, scraper="firecrawl"),
+        )
+    finally:
+        service._acreate_patcher.stop()
+        service._repo_patcher.stop()
 
     # All three enrichments must complete before the run is marked completed
     completed_idx = next(i for i, e in enumerate(call_order) if e[0] == "completed")

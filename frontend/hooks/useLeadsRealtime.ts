@@ -29,6 +29,8 @@ export function useLeadsRealtime(initialLeads: Lead[]): Lead[] {
   }, [initialLeads])
 
   useEffect(() => {
+    let active = true
+
     const channel = supabase
       .channel(channelRef.current)
       .on(
@@ -45,9 +47,17 @@ export function useLeadsRealtime(initialLeads: Lead[]): Lead[] {
           )
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        // Network proxies (e.g. university networks) can block WSS upgrades.
+        // On failure stop retrying — router.refresh() polling covers live updates.
+        if (!active) return
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          supabase.removeChannel(channel)
+        }
+      })
 
     return () => {
+      active = false
       supabase.removeChannel(channel)
     }
   }, [])

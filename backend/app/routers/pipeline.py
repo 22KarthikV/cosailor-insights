@@ -46,7 +46,6 @@ async def run_pipeline(body: PipelineRunRequest, background_tasks: BackgroundTas
     )
 
     service = PipelineService(
-        repo=repo,
         scraper=scraper,
         researcher=ContractorResearcher(api_key=settings.perplexity_api_key),
         enricher=LeadEnricher(api_key=settings.anthropic_api_key),
