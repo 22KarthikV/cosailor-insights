@@ -3,52 +3,97 @@
 /**
  * PipelineControls — form for triggering a pipeline run and tracking progress.
  *
- * Polls GET /api/pipeline/status/:run_id every 3 seconds while a run is active.
- * On every successful poll, calls revalidateLeads() (server action) then
- * router.refresh() so the Server Component re-fetches fresh leads from the DB.
- * This means partial cards appear as soon as scraping writes leads to the DB,
- * and score badges fill in progressively as each enrichment completes.
+ * Resilience features:
+ *   - On mount, calls GET /api/pipeline/latest to restore the last run's state.
+ *     If it was 'running', polling resumes automatically. If 'failed', a Retry
+ *     button appears pre-filled with the original params.
+ *   - run_id is persisted to localStorage so a hard page refresh reconnects to
+ *     an in-progress run without losing the polling state.
+ *   - On server restart, the lifespan hook marks orphaned 'running' runs as
+ *     'failed' with a clear "interrupted" message — the UI surfaces this and
+ *     offers a one-click retry.
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { triggerPipeline, getPipelineStatus } from '@/lib/api';
+import { triggerPipeline, getPipelineStatus, getLatestPipelineRun } from '@/lib/api';
 import { revalidateLeads } from '@/app/actions';
 import type { PipelineStatusResponse } from '@/lib/types';
 
 const DISTANCE_OPTIONS = [25, 50, 100] as const;
 type DistanceOption = (typeof DISTANCE_OPTIONS)[number];
 
+const DEFAULT_POSTAL_CODE = '10013';
+const DEFAULT_DISTANCE: DistanceOption = 25;
 const DEFAULT_COUNTRY_CODE = 'us' as const;
 const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
+const LS_KEY = 'cosailor_pipeline_run_id';
+
+const INTERRUPTED_PREFIX = 'Server restarted';
+
+function isInterrupted(status: PipelineStatusResponse): boolean {
+  return (
+    status.status === 'failed' &&
+    (status.error_message?.startsWith(INTERRUPTED_PREFIX) ?? false)
+  );
+}
 
 export function PipelineControls(): React.JSX.Element {
   const isMounted = useRef(true);
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
+  useEffect(() => () => { isMounted.current = false; }, []);
 
   const router = useRouter();
   const [runId, setRunId] = useState<string | null>(null);
   const [pipeStatus, setPipeStatus] = useState<PipelineStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [postalCode, setPostalCode] = useState<string>('10013');
-  const [distance, setDistance] = useState<DistanceOption>(25);
+  const [postalCode, setPostalCode] = useState<string>(DEFAULT_POSTAL_CODE);
+  const [distance, setDistance] = useState<DistanceOption>(DEFAULT_DISTANCE);
 
   const isRunning = pipeStatus?.status === 'running';
   const isValidPostalCode = US_ZIP_REGEX.test(postalCode.trim());
   const isSubmitDisabled = loading || isRunning || postalCode.trim() === '' || !isValidPostalCode;
 
+  // On mount: restore last run from the backend so state survives page refreshes.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restore() {
+      try {
+        const latest = await getLatestPipelineRun();
+        if (cancelled || !isMounted.current) return;
+
+        // Pre-fill form with the params from the last run
+        if (DISTANCE_OPTIONS.includes(latest.distance as DistanceOption)) {
+          setDistance(latest.distance as DistanceOption);
+        }
+        if (latest.postal_code) setPostalCode(latest.postal_code);
+
+        if (latest.status === 'running') {
+          // Re-attach to an in-progress run — polling useEffect will start automatically
+          setRunId(latest.run_id);
+          setPipeStatus(latest);
+          localStorage.setItem(LS_KEY, latest.run_id);
+        } else if (latest.status === 'failed' || latest.status === 'completed') {
+          // Show the last terminal status so the user can see what happened
+          setPipeStatus(latest);
+        }
+      } catch {
+        // No runs yet or backend down — start fresh
+      }
+    }
+
+    restore();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleRun = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Bust cache so the first refresh after scraping shows fresh data
       await revalidateLeads();
       const data = await triggerPipeline(postalCode.trim(), DEFAULT_COUNTRY_CODE, distance, 'playwright');
+      localStorage.setItem(LS_KEY, data.run_id);
       setRunId(data.run_id);
       setPipeStatus({
         run_id: data.run_id,
@@ -58,6 +103,9 @@ export function PipelineControls(): React.JSX.Element {
         started_at: new Date().toISOString(),
         finished_at: null,
         error_message: null,
+        postal_code: postalCode.trim(),
+        country_code: DEFAULT_COUNTRY_CODE,
+        distance,
       });
     } catch {
       setError('Failed to start pipeline. Is the backend running on port 8000?');
@@ -66,11 +114,7 @@ export function PipelineControls(): React.JSX.Element {
     }
   };
 
-  /**
-   * Poll every 3 seconds while a run is active.
-   * Each tick: revalidate cache, then refresh the Server Component so
-   * partial cards appear progressively as leads are scraped and enriched.
-   */
+  // Poll every 3 s while a run is active.
   useEffect(() => {
     if (!runId || !isRunning) return;
 
@@ -80,24 +124,24 @@ export function PipelineControls(): React.JSX.Element {
         if (!isMounted.current) return;
         setPipeStatus(status);
         await revalidateLeads();
-        // Refresh only on page 1 to avoid racing with pagination router.push.
-        // Realtime subscription handles in-place updates for other pages.
-        const onFirstPage = !window.location.search
-          || !window.location.search.includes('page=')
-          || window.location.search.includes('page=1');
-        if (onFirstPage) {
-          router.refresh();
-        }
+        const onFirstPage =
+          !window.location.search ||
+          !window.location.search.includes('page=') ||
+          window.location.search.includes('page=1');
+        if (onFirstPage) router.refresh();
         if (status.status === 'completed' || status.status === 'failed') {
           clearInterval(interval);
+          localStorage.removeItem(LS_KEY);
         }
       } catch {
-        /* keep polling — transient network errors should not cancel the interval */
+        // Transient network error — keep polling
       }
     }, 3000);
 
     return () => clearInterval(interval);
   }, [runId, isRunning, router]);
+
+  const interrupted = pipeStatus ? isInterrupted(pipeStatus) : false;
 
   return (
     <div className="flex items-center gap-4 flex-wrap">
@@ -152,6 +196,8 @@ export function PipelineControls(): React.JSX.Element {
               <span className="animate-spin mr-2 inline-block">&#x27F3;</span>
               Running Pipeline...
             </>
+          ) : interrupted ? (
+            '↺ Retry Pipeline'
           ) : (
             '⚡ Run Pipeline'
           )}
@@ -159,7 +205,7 @@ export function PipelineControls(): React.JSX.Element {
       </div>
 
       {pipeStatus && (
-        <div className="text-sm">
+        <div className="text-sm max-w-xs">
           {pipeStatus.status === 'running' && (
             <span className="text-gray-600">
               Scraped {pipeStatus.leads_scraped} &middot; Enriched {pipeStatus.leads_enriched}
@@ -171,7 +217,14 @@ export function PipelineControls(): React.JSX.Element {
             </span>
           )}
           {pipeStatus.status === 'failed' && (
-            <span className="text-red-600">&#x2717; Pipeline failed</span>
+            <span
+              className={interrupted ? 'text-amber-600' : 'text-red-600'}
+              title={pipeStatus.error_message ?? undefined}
+            >
+              {interrupted
+                ? '⚠ Pipeline interrupted by server restart — click Retry Pipeline to resume'
+                : `✗ Pipeline failed${pipeStatus.error_message ? `: ${pipeStatus.error_message.slice(0, 120)}` : ''}`}
+            </span>
           )}
         </div>
       )}

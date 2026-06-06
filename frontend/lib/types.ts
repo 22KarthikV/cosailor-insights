@@ -59,7 +59,7 @@ export interface PipelineRunResponse {
   message: string;
 }
 
-/** Current state of a pipeline run, returned by GET /api/pipeline/status/:run_id. */
+/** Current state of a pipeline run, returned by GET /api/pipeline/status/:run_id and /latest. */
 export interface PipelineStatusResponse {
   run_id: string;
   /** 'running' while the background task is active; terminal states are 'completed' or 'failed'. */
@@ -69,4 +69,8 @@ export interface PipelineStatusResponse {
   started_at: string;
   finished_at: string | null;
   error_message: string | null;
+  /** Original params — used by the frontend to pre-fill the retry form. */
+  postal_code: string;
+  country_code: string;
+  distance: number;
 }
