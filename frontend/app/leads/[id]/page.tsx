@@ -1,17 +1,5 @@
-/**
- * Lead detail page — rendered at /leads/:id.
- *
- * Fetches a single lead server-side and renders a full-page breakdown
- * including dual score badges (lead + convertibility), opportunity signals,
- * AI sales summary, talking points, recommended approach, and raw research.
- *
- * Calls notFound() when the backend returns a non-2xx response, letting
- * Next.js serve its built-in 404 page.
- */
 import { getLead } from '@/lib/api';
-import { ScoreBadge } from '@/components/ScoreBadge';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScoreRing } from '@/components/ScoreRing';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
@@ -19,6 +7,163 @@ import ReactMarkdown from 'react-markdown';
 interface Props {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ from_page?: string; from_limit?: string }>;
+}
+
+function SectionCard({
+  title,
+  accent,
+  children,
+}: {
+  title: string;
+  accent?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-xl p-5 animate-slide-up"
+      style={{
+        background: '#0F1117',
+        border: '1px solid #1C2333',
+        borderLeft: accent ? `3px solid ${accent}` : '1px solid #1C2333',
+      }}
+    >
+      <h2
+        className="text-xs font-mono uppercase tracking-widest mb-3"
+        style={{ color: '#3D4558' }}
+      >
+        {title}
+      </h2>
+      {children}
+    </div>
+  );
+}
+
+function ScorePanel({
+  leadScore,
+  convertibilityScore,
+  scoreRationale,
+  convertibilityRationale,
+  certifications,
+  rating,
+  reviewCount,
+  status,
+  enrichedAt,
+}: {
+  leadScore: number | null;
+  convertibilityScore: number | null;
+  scoreRationale: string | null;
+  convertibilityRationale: string | null;
+  certifications: string[];
+  rating: number | null;
+  reviewCount: number | null;
+  status: string;
+  enrichedAt: string | null;
+}) {
+  const statusColor =
+    status === 'enriched' ? '#00E87A' : status === 'failed' ? '#FF4757' : '#7A8499';
+
+  return (
+    <div
+      className="rounded-xl p-5 space-y-5 animate-slide-up"
+      style={{
+        background: '#0F1117',
+        border: '1px solid #1C2333',
+        animationDelay: '80ms',
+      }}
+    >
+      {/* Dual score rings */}
+      <div className="flex items-start gap-5">
+        {[
+          { label: 'Lead Score', score: leadScore, rationale: scoreRationale },
+          { label: 'Convertibility', score: convertibilityScore, rationale: convertibilityRationale },
+        ].map(({ label, score, rationale }) => (
+          <div key={label} className="flex flex-col items-center gap-2 flex-1">
+            <span className="text-xs font-mono uppercase tracking-widest" style={{ color: '#3D4558' }}>
+              {label}
+            </span>
+            <ScoreRing score={score} size="md" />
+            {rationale && (
+              <p className="text-xs text-center leading-snug" style={{ color: '#7A8499' }}>
+                {rationale}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Divider */}
+      <div style={{ height: 1, background: '#1C2333' }} />
+
+      {/* Certifications */}
+      {certifications.length > 0 && (
+        <div>
+          <p className="text-xs font-mono uppercase tracking-widest mb-2" style={{ color: '#3D4558' }}>
+            Certifications
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {certifications.map((cert) => (
+              <span
+                key={cert}
+                className="text-xs px-2.5 py-1 rounded"
+                style={{
+                  background: '#161B22',
+                  color: '#00C8FF',
+                  border: '1px solid rgba(0,200,255,0.15)',
+                }}
+              >
+                {cert}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rating */}
+      {rating !== null && (
+        <div>
+          <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: '#3D4558' }}>
+            Rating
+          </p>
+          <div className="flex items-center gap-2">
+            <span style={{ color: '#FFB020' }}>{'★'.repeat(Math.floor(rating))}</span>
+            <span className="text-sm font-mono font-semibold" style={{ color: '#E8ECF4' }}>
+              {rating.toFixed(1)}
+            </span>
+            {reviewCount !== null && (
+              <span className="text-xs" style={{ color: '#7A8499' }}>
+                ({reviewCount})
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Status + timestamp */}
+      <div style={{ borderTop: '1px solid #1C2333', paddingTop: '12px' }}>
+        <div className="flex items-center justify-between">
+          <span
+            className="text-xs font-mono px-2 py-0.5 rounded-full capitalize"
+            style={{
+              color: statusColor,
+              background: `${statusColor}15`,
+              border: `1px solid ${statusColor}30`,
+            }}
+          >
+            {status}
+          </span>
+          {enrichedAt && (
+            <span className="text-xs font-mono" style={{ color: '#3D4558' }}>
+              {new Date(enrichedAt).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default async function LeadDetailPage({ params, searchParams }: Props) {
@@ -34,237 +179,205 @@ export default async function LeadDetailPage({ params, searchParams }: Props) {
   const location = [lead.city, lead.state].filter(Boolean).join(', ');
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <Link href={backHref} className="text-sm text-blue-600 hover:underline mb-6 inline-block">
-        &larr; Back to Dashboard
-      </Link>
-
-      {/* Error banner — only shown when enrichment failed */}
-      {lead.status === 'failed' && (
-        <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <p className="font-semibold">Enrichment failed</p>
-          {lead.error_message && (
-            <p className="mt-1 text-red-600">{lead.error_message}</p>
-          )}
-        </div>
-      )}
-
-      {/* Header: company info left, dual score column right */}
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{lead.company_name}</h1>
-          {location && <p className="text-gray-500 mt-1">{location}</p>}
-          {lead.phone && <p className="text-sm text-gray-500 mt-1">{lead.phone}</p>}
-          {lead.website && (
-            <a
-              href={lead.website}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline mt-1 block"
-            >
-              {lead.website}
-            </a>
-          )}
-        </div>
-
-        {/* Compact score chips — badge + mini-bar only; rationale lives in the Score Analysis card below */}
-        <div className="flex flex-row items-center gap-5 shrink-0">
-          {(
-            [
-              { label: 'Lead', score: lead.lead_score, ariaLabel: 'Lead score' },
-              { label: 'Conv.', score: lead.convertibility_score, ariaLabel: 'Convertibility score' },
-            ] as const
-          ).map(({ label, score, ariaLabel }) =>
-            score !== null ? (
-              <div key={label} className="flex flex-col items-center gap-1.5">
-                <span className="text-xs text-gray-400 font-medium">{label}</span>
-                <ScoreBadge score={score} size="lg" />
-                <div className="w-14 bg-gray-200 rounded-full h-1 overflow-hidden">
-                  <div
-                    className={
-                      'h-1 rounded-full ' +
-                      (score >= 8 ? 'bg-green-500' : score >= 5 ? 'bg-yellow-500' : 'bg-red-500')
-                    }
-                    style={{ width: `${(score / 10) * 100}%` }}
-                    role="progressbar"
-                    aria-valuenow={score}
-                    aria-valuemin={0}
-                    aria-valuemax={10}
-                    aria-label={`${ariaLabel}: ${score} out of 10`}
-                  />
-                </div>
-              </div>
-            ) : null
-          )}
-        </div>
-      </div>
-
-      {/* Certifications + rating badges */}
-      {(lead.certifications.length > 0 || lead.rating !== null) && (
-        <div className="flex flex-wrap gap-2 mb-6">
-          {lead.certifications.map((c) => (
-            <Badge key={c} variant="secondary">
-              {c}
-            </Badge>
-          ))}
-          {lead.rating !== null && (
-            <Badge variant="outline">
-              &#9733; {lead.rating.toFixed(1)} ({lead.review_count} reviews)
-            </Badge>
-          )}
-        </div>
-      )}
-
-      <div className="space-y-4">
-        {/* Score Analysis — rationale text lives here, not in the compact header chips */}
-        {(lead.score_rationale || lead.convertibility_rationale) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Score Analysis</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                {lead.score_rationale && (
-                  <div>
-                    <dt className="text-xs text-gray-500 uppercase tracking-wide mb-1">Lead Score</dt>
-                    <dd className="text-gray-700 leading-snug">{lead.score_rationale}</dd>
-                  </div>
-                )}
-                {lead.convertibility_rationale && (
-                  <div>
-                    <dt className="text-xs text-gray-500 uppercase tracking-wide mb-1">Convertibility</dt>
-                    <dd className="text-gray-700 leading-snug">{lead.convertibility_rationale}</dd>
-                  </div>
-                )}
-              </dl>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Opportunity Signals — distance band + composite priority index */}
-        {(lead.distance_band !== null || lead.priority_index !== null) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Opportunity Signals</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-                {lead.distance_band !== null && (
-                  <div>
-                    <dt className="text-xs text-gray-500 uppercase tracking-wide">Distance</dt>
-                    <dd className="mt-1 font-semibold capitalize">{lead.distance_band}</dd>
-                    {lead.distance_miles !== null && (
-                      <dd className="text-xs text-gray-400">
-                        {lead.distance_miles.toFixed(1)} mi away
-                      </dd>
-                    )}
-                  </div>
-                )}
-                {lead.priority_index !== null && (
-                  <div>
-                    <dt className="text-xs text-gray-500 uppercase tracking-wide">Priority Index</dt>
-                    <dd className="mt-1 font-semibold">{lead.priority_index.toFixed(2)}</dd>
-                    <dd className="text-xs text-gray-400">composite rank</dd>
-                  </div>
-                )}
-              </dl>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* AI Sales Summary — Claude-generated 2–3 sentence overview */}
-        {lead.ai_summary && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Sales Summary</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm prose-gray max-w-none">
-                <ReactMarkdown>{lead.ai_summary}</ReactMarkdown>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Talking Points — up to 3 contractor-specific sales hooks */}
-        {lead.talking_points.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Talking Points</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2">
-                {lead.talking_points.map((point, i) => (
-                  <li key={i} className="flex gap-2 text-sm text-gray-700">
-                    <span className="text-blue-500 font-bold shrink-0">{i + 1}.</span>
-                    <span>{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Recommended Approach — Claude's suggested outreach strategy */}
-        {lead.recommended_approach && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Recommended Approach</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm prose-gray max-w-none">
-                <ReactMarkdown>{lead.recommended_approach}</ReactMarkdown>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Web Research — raw Perplexity summary stored in Stage 2 */}
-        {lead.research_summary && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold text-gray-400">
-                Web Research (Perplexity)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-xs prose-gray max-w-none text-xs leading-relaxed">
-                <ReactMarkdown>{lead.research_summary}</ReactMarkdown>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      {/* Status / meta footer */}
-      <div className="mt-8 pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
-        <span>
-          Status:{' '}
-          <span
-            className={
-              'font-medium capitalize ' +
-              (lead.status === 'enriched'
-                ? 'text-green-600'
-                : lead.status === 'failed'
-                  ? 'text-red-600'
-                  : 'text-gray-500')
-            }
+    <div className="min-h-screen" style={{ background: '#08090C' }}>
+      {/* Sticky back nav */}
+      <div
+        className="sticky top-0 z-10 px-6 py-3"
+        style={{
+          background: 'rgba(8,9,12,0.85)',
+          borderBottom: '1px solid #1C2333',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+        }}
+      >
+        <div className="max-w-6xl mx-auto">
+          <Link
+            href={backHref}
+            className="back-link inline-flex items-center gap-2 text-sm transition-colors duration-150"
           >
-            {lead.status}
-          </span>
-        </span>
-        {lead.enriched_at && (
-          <span>
-            Enriched{' '}
-            {new Date(lead.enriched_at).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </span>
+            ← Back to dashboard
+          </Link>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        {/* Error banner */}
+        {lead.status === 'failed' && (
+          <div
+            className="mb-6 px-4 py-3 rounded-xl text-sm"
+            style={{
+              background: 'rgba(255,71,87,0.08)',
+              border: '1px solid rgba(255,71,87,0.25)',
+              color: '#FF4757',
+            }}
+          >
+            <p className="font-semibold">Enrichment failed</p>
+            {lead.error_message && (
+              <p className="mt-1 text-xs opacity-80">{lead.error_message}</p>
+            )}
+          </div>
         )}
+
+        {/* Company header */}
+        <div className="mb-8 animate-slide-up">
+          <h1
+            className="text-3xl sm:text-4xl font-heading font-bold tracking-tight"
+            style={{ color: '#E8ECF4' }}
+          >
+            {lead.company_name}
+          </h1>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+            {location && (
+              <span className="text-sm" style={{ color: '#7A8499' }}>{location}</span>
+            )}
+            {lead.phone && (
+              <span className="text-sm font-mono" style={{ color: '#7A8499' }}>{lead.phone}</span>
+            )}
+            {lead.website && (
+              <a
+                href={lead.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm transition-colors duration-150"
+                style={{ color: '#00C8FF' }}
+              >
+                {lead.website.replace(/^https?:\/\//, '')}
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Two-column layout: content left, score panel right */}
+        <div className="flex flex-col lg:grid lg:grid-cols-[1fr_300px] gap-6">
+          {/* Left: content sections */}
+          <div className="space-y-4 min-w-0 order-2 lg:order-1">
+            {/* AI Summary */}
+            {lead.ai_summary && (
+              <SectionCard title="Sales Summary" accent="#00C8FF">
+                <div
+                  className="text-sm leading-relaxed prose prose-sm max-w-none"
+                  style={{ color: '#E8ECF4' }}
+                >
+                  <ReactMarkdown>{lead.ai_summary}</ReactMarkdown>
+                </div>
+              </SectionCard>
+            )}
+
+            {/* Talking Points */}
+            {lead.talking_points.length > 0 && (
+              <SectionCard title="Talking Points" accent="#FFB020">
+                <ol className="space-y-3">
+                  {lead.talking_points.map((point, i) => (
+                    <li
+                      key={i}
+                      className="flex gap-3 text-sm group"
+                    >
+                      <span
+                        className="font-mono font-bold shrink-0 w-5 text-right"
+                        style={{ color: '#FFB020' }}
+                      >
+                        {i + 1}.
+                      </span>
+                      <span style={{ color: '#E8ECF4' }}>{point}</span>
+                    </li>
+                  ))}
+                </ol>
+              </SectionCard>
+            )}
+
+            {/* Recommended Approach */}
+            {lead.recommended_approach && (
+              <SectionCard title="Recommended Approach" accent="#00E87A">
+                <div
+                  className="text-sm leading-relaxed prose prose-sm max-w-none"
+                  style={{ color: '#E8ECF4' }}
+                >
+                  <ReactMarkdown>{lead.recommended_approach}</ReactMarkdown>
+                </div>
+              </SectionCard>
+            )}
+
+            {/* Opportunity Signals */}
+            {(lead.distance_band !== null || lead.priority_index !== null) && (
+              <SectionCard title="Opportunity Signals">
+                <div className="flex flex-wrap gap-4">
+                  {lead.distance_band !== null && (
+                    <div
+                      className="px-4 py-3 rounded-lg"
+                      style={{ background: '#161B22', border: '1px solid #2D3748' }}
+                    >
+                      <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: '#3D4558' }}>
+                        Distance
+                      </p>
+                      <p className="font-heading font-bold capitalize" style={{ color: '#E8ECF4' }}>
+                        {lead.distance_band}
+                      </p>
+                      {lead.distance_miles !== null && (
+                        <p className="text-xs font-mono mt-0.5" style={{ color: '#7A8499' }}>
+                          {lead.distance_miles.toFixed(1)} mi away
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {lead.priority_index !== null && (
+                    <div
+                      className="px-4 py-3 rounded-lg"
+                      style={{ background: '#161B22', border: '1px solid #2D3748' }}
+                    >
+                      <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: '#3D4558' }}>
+                        Priority Index
+                      </p>
+                      <p className="font-heading font-bold font-mono" style={{ color: '#00C8FF' }}>
+                        {lead.priority_index.toFixed(2)}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: '#7A8499' }}>
+                        composite rank
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
+            )}
+
+            {/* Web Research (collapsible feel via details/summary) */}
+            {lead.research_summary && (
+              <details
+                className="rounded-xl overflow-hidden"
+                style={{ background: '#0F1117', border: '1px solid #1C2333' }}
+              >
+                <summary
+                  className="px-5 py-4 cursor-pointer text-xs font-mono uppercase tracking-widest select-none"
+                  style={{ color: '#3D4558', listStyle: 'none' }}
+                >
+                  <span>▸ Web Research (Perplexity)</span>
+                </summary>
+                <div
+                  className="px-5 pb-5 text-xs leading-relaxed prose prose-sm max-w-none"
+                  style={{ color: '#7A8499' }}
+                >
+                  <ReactMarkdown>{lead.research_summary}</ReactMarkdown>
+                </div>
+              </details>
+            )}
+          </div>
+
+          {/* Right: sticky score panel */}
+          <div className="order-1 lg:order-2">
+            <div className="lg:sticky lg:top-20">
+              <ScorePanel
+                leadScore={lead.lead_score}
+                convertibilityScore={lead.convertibility_score}
+                scoreRationale={lead.score_rationale}
+                convertibilityRationale={lead.convertibility_rationale}
+                certifications={lead.certifications}
+                rating={lead.rating}
+                reviewCount={lead.review_count}
+                status={lead.status}
+                enrichedAt={lead.enriched_at}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

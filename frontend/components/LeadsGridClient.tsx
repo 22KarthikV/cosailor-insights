@@ -1,20 +1,5 @@
 'use client';
 
-/**
- * LeadsGridClient — interactive leads grid with URL-driven filtering, sorting,
- * and real-time updates.
- *
- * Filtering and sorting are now server-side: filter/sort controls push new URL
- * params, which re-runs the Server Component (LeadsSection) so the backend
- * returns an accurate filtered total and the correct page of results.
- * No client-side filter/sort logic remains here.
- *
- * Sub-components:
- *   StatChip          — single statistic tile
- *   StatsBar          — row of StatChips (page count, avg score, enriched count)
- *   LeadFilterControls — score-tier filter buttons and sort selector (URL-driven)
- *   PaginationControls — prev/next/page-size (preserves score_tier & sort_by)
- */
 import React, { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { LeadCard } from './LeadCard';
@@ -33,20 +18,6 @@ interface LeadsGridClientProps {
   sortBy: SortOption;
 }
 
-interface StatChipProps {
-  label: string;
-  value: string | number;
-}
-
-function StatChip({ label, value }: StatChipProps) {
-  return (
-    <div className="rounded-lg border bg-gray-50 px-4 py-2 flex flex-col gap-0.5 min-w-25">
-      <span className="text-xs text-gray-500">{label}</span>
-      <span className="text-lg font-bold text-gray-900 leading-tight">{value}</span>
-    </div>
-  );
-}
-
 function computeStats(leads: Lead[]) {
   const enrichedLeads = leads.filter((l) => l.status === 'enriched');
   const enrichedCount = enrichedLeads.length;
@@ -58,32 +29,62 @@ function computeStats(leads: Lead[]) {
   return { enrichedCount, avgScore };
 }
 
+interface StatChipProps {
+  label: string;
+  value: string | number;
+  accent?: string;
+}
+
+function StatChip({ label, value, accent }: StatChipProps) {
+  return (
+    <div
+      className="flex flex-col gap-0.5 px-4 py-3 rounded-lg"
+      style={{ background: '#0F1117', border: '1px solid #1C2333' }}
+    >
+      <span className="text-xs uppercase tracking-widest" style={{ color: '#3D4558' }}>
+        {label}
+      </span>
+      <span
+        className="text-xl font-bold font-heading leading-tight tabular-nums"
+        style={{ color: accent ?? '#E8ECF4' }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 interface StatsBarProps {
   pageCount: number;
   enrichedCount: number;
   avgScore: string;
 }
 
-function StatsBar({ pageCount, enrichedCount, avgScore }: StatsBarProps): React.JSX.Element {
+function StatsBar({ pageCount, enrichedCount, avgScore }: StatsBarProps) {
   return (
     <div className="flex flex-wrap gap-3">
       <StatChip label="This Page" value={pageCount} />
-      <StatChip label="Avg Score" value={avgScore} />
-      <StatChip label="Enriched" value={`${enrichedCount} / ${pageCount}`} />
+      <StatChip label="Avg Score" value={avgScore} accent="#00C8FF" />
+      <StatChip label="Enriched" value={`${enrichedCount} / ${pageCount}`} accent="#00E87A" />
     </div>
   );
 }
 
-const SCORE_FILTER_OPTIONS: { value: ScoreTier; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'high', label: 'High (8-10)' },
-  { value: 'medium', label: 'Medium (5-7)' },
-  { value: 'low', label: 'Low (1-4)' },
+const SCORE_FILTER_OPTIONS: {
+  value: ScoreTier;
+  label: string;
+  activeColor: string;
+  activeBg: string;
+}[] = [
+  { value: 'all',    label: 'All',        activeColor: '#00C8FF', activeBg: 'rgba(0,200,255,0.12)' },
+  { value: 'high',   label: 'High 8-10',  activeColor: '#00E87A', activeBg: 'rgba(0,232,122,0.12)' },
+  { value: 'medium', label: 'Mid 5-7',    activeColor: '#FFB020', activeBg: 'rgba(255,176,32,0.12)' },
+  { value: 'low',    label: 'Low 1-4',    activeColor: '#FF4757', activeBg: 'rgba(255,71,87,0.12)' },
 ];
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'score_desc', label: 'Score (High to Low)' },
-  { value: 'name_asc', label: 'Name (A to Z)' },
+  { value: 'score_desc',       label: 'Score: High → Low' },
+  { value: 'name_asc',         label: 'Name: A → Z' },
   { value: 'recently_enriched', label: 'Recently Enriched' },
 ];
 
@@ -101,47 +102,61 @@ function LeadFilterControls({
   filteredTotal,
   onFilterChange,
   onSortChange,
-}: LeadFilterControlsProps): React.JSX.Element {
+}: LeadFilterControlsProps) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <div
-        className="flex items-center gap-0 rounded border border-gray-200 overflow-hidden"
-        role="group"
-        aria-label="Filter by score"
-      >
-        {SCORE_FILTER_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onFilterChange(opt.value)}
-            className={
-              'px-3 py-1 text-xs border-r border-gray-200 last:border-r-0 transition-colors ' +
-              (scoreTier === opt.value
-                ? 'bg-blue-600 text-white font-medium'
-                : 'bg-white text-gray-600 hover:bg-gray-100')
-            }
-            aria-pressed={scoreTier === opt.value}
-          >
-            {opt.label}
-          </button>
-        ))}
+      {/* Score tier pills */}
+      <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter by score tier">
+        {SCORE_FILTER_OPTIONS.map((opt) => {
+          const isActive = scoreTier === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onFilterChange(opt.value)}
+              aria-pressed={isActive}
+              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150"
+              style={{
+                color: isActive ? opt.activeColor : '#7A8499',
+                background: isActive ? opt.activeBg : 'transparent',
+                border: `1px solid ${isActive ? opt.activeColor : '#1C2333'}`,
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
 
-      <select
-        value={sortBy}
-        onChange={(e) => onSortChange(e.target.value as SortOption)}
-        className="border border-gray-200 rounded px-3 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
-        aria-label="Sort leads"
-      >
-        {SORT_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
+      {/* Sort selector */}
+      <div className="relative">
+        <select
+          value={sortBy}
+          onChange={(e) => onSortChange(e.target.value as SortOption)}
+          aria-label="Sort leads"
+          className="appearance-none pl-3 pr-7 py-1.5 rounded-lg text-xs font-medium cursor-pointer focus:outline-none"
+          style={{
+            background: '#161B22',
+            border: '1px solid #2D3748',
+            color: '#7A8499',
+          }}
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <span
+          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+          style={{ color: '#3D4558' }}
+        >
+          ▾
+        </span>
+      </div>
 
       {scoreTier !== 'all' && (
-        <span className="text-xs text-gray-400">
+        <span className="text-xs font-mono" style={{ color: '#3D4558' }}>
           {filteredTotal} result{filteredTotal !== 1 ? 's' : ''}
         </span>
       )}
@@ -159,7 +174,7 @@ interface PaginationControlsProps {
   sortBy: SortOption;
 }
 
-function PaginationControls({ page, limit, total, scoreTier, sortBy }: PaginationControlsProps): React.JSX.Element {
+function PaginationControls({ page, limit, total, scoreTier, sortBy }: PaginationControlsProps) {
   const router = useRouter();
   const totalPages = Math.ceil(total / limit);
   const startItem = total === 0 ? 0 : (page - 1) * limit + 1;
@@ -174,47 +189,71 @@ function PaginationControls({ page, limit, total, scoreTier, sortBy }: Paginatio
     router.push(`/?${params.toString()}`);
   };
 
+  const btnBase: React.CSSProperties = {
+    background: '#0F1117',
+    border: '1px solid #1C2333',
+    color: '#7A8499',
+    borderRadius: '0.5rem',
+    padding: '6px 12px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  };
+
   return (
-    <div className="flex items-center justify-between flex-wrap gap-3 mt-4">
-      <span className="text-xs text-gray-500">
-        {total === 0 ? 'No leads' : `Showing ${startItem}–${endItem} of ${total} leads`}
+    <div className="flex items-center justify-between flex-wrap gap-3 mt-6 pt-4" style={{ borderTop: '1px solid #1C2333' }}>
+      <span className="text-xs font-mono" style={{ color: '#3D4558' }}>
+        {total === 0 ? 'No leads' : `${startItem}–${endItem} of ${total}`}
       </span>
 
       <div className="flex items-center gap-2">
-        <label htmlFor="page-size" className="text-xs text-gray-500">
-          Per page:
+        <label htmlFor="page-size" className="text-xs" style={{ color: '#3D4558' }}>
+          Per page
         </label>
-        <select
-          id="page-size"
-          value={limit}
-          onChange={(e) => navigate(1, Number(e.target.value))}
-          className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          {PAGE_SIZE_OPTIONS.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            id="page-size"
+            value={limit}
+            onChange={(e) => navigate(1, Number(e.target.value))}
+            className="appearance-none pl-3 pr-6 py-1.5 rounded-lg text-xs font-mono focus:outline-none cursor-pointer"
+            style={{
+              background: '#0F1117',
+              border: '1px solid #1C2333',
+              color: '#7A8499',
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+          <span
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+            style={{ color: '#3D4558' }}
+          >
+            ▾
+          </span>
+        </div>
 
         <button
           type="button"
           onClick={() => navigate(page - 1, limit)}
           disabled={page <= 1}
-          className="px-3 py-1 text-xs rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ ...btnBase, opacity: page <= 1 ? 0.3 : 1, cursor: page <= 1 ? 'not-allowed' : 'pointer' }}
         >
-          Prev
+          ←
         </button>
-        <span className="text-xs text-gray-500">
+
+        <span className="text-xs font-mono px-2" style={{ color: '#7A8499' }}>
           {page} / {totalPages || 1}
         </span>
+
         <button
           type="button"
           onClick={() => navigate(page + 1, limit)}
           disabled={page >= totalPages}
-          className="px-3 py-1 text-xs rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ ...btnBase, opacity: page >= totalPages ? 0.3 : 1, cursor: page >= totalPages ? 'not-allowed' : 'pointer' }}
         >
-          Next
+          →
         </button>
       </div>
     </div>
@@ -228,10 +267,9 @@ export function LeadsGridClient({
   total,
   scoreTier,
   sortBy,
-}: LeadsGridClientProps): React.JSX.Element {
+}: LeadsGridClientProps) {
   const router = useRouter();
   const leads = useLeadsRealtime(initialLeads, page, limit, scoreTier, sortBy);
-
   const { enrichedCount, avgScore } = useMemo(() => computeStats(leads), [leads]);
 
   const pushFilter = (f: ScoreTier) => {
@@ -254,10 +292,20 @@ export function LeadsGridClient({
 
   if (scoreTier === 'all' && total === 0) {
     return (
-      <div className="text-center py-16 text-gray-500">
-        <div className="text-5xl mb-4">📋</div>
-        <p className="text-lg font-medium text-gray-700">No leads yet</p>
-        <p className="text-sm text-gray-500 mt-1">
+      <div className="text-center py-24">
+        <div
+          className="text-5xl mb-6 font-mono"
+          style={{ color: '#1C2333' }}
+        >
+          ◈
+        </div>
+        <p
+          className="text-base font-heading font-semibold mb-1"
+          style={{ color: '#7A8499' }}
+        >
+          No leads yet
+        </p>
+        <p className="text-sm" style={{ color: '#3D4558' }}>
           Run the pipeline to scrape and enrich GAF contractors.
         </p>
       </div>
@@ -265,13 +313,19 @@ export function LeadsGridClient({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <StatsBar
         pageCount={leads.length}
         enrichedCount={enrichedCount}
         avgScore={avgScore !== null ? avgScore.toFixed(1) : '—'}
       />
-      <p className="text-xs text-gray-400 mb-2">{total} contractors total</p>
+
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <span className="text-xs font-mono" style={{ color: '#3D4558' }}>
+          {total} contractors total
+        </span>
+      </div>
+
       <LeadFilterControls
         scoreTier={scoreTier}
         sortBy={sortBy}
@@ -279,22 +333,27 @@ export function LeadsGridClient({
         onFilterChange={pushFilter}
         onSortChange={pushSort}
       />
+
       {leads.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-gray-500 text-sm">No leads match the selected filter.</p>
+        <div className="text-center py-20">
+          <p className="text-sm" style={{ color: '#3D4558' }}>
+            No leads match the selected filter.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {leads.map((lead) => (
-            <div
+          {leads.map((lead, i) => (
+            <LeadCard
               key={lead.id}
-              className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-full"
-            >
-              <LeadCard lead={lead} page={page} limit={limit} />
-            </div>
+              lead={lead}
+              page={page}
+              limit={limit}
+              index={i}
+            />
           ))}
         </div>
       )}
+
       <PaginationControls
         page={page}
         limit={limit}

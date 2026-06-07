@@ -1,24 +1,11 @@
 'use client';
 
-/**
- * PipelineControls — form for triggering a pipeline run and tracking progress.
- *
- * Resilience features:
- *   - On mount, calls GET /api/pipeline/latest to restore the last run's state.
- *     If it was 'running', polling resumes automatically. If 'failed', a Retry
- *     button appears pre-filled with the original params.
- *   - run_id is persisted to localStorage so a hard page refresh reconnects to
- *     an in-progress run without losing the polling state.
- *   - On server restart, the lifespan hook marks orphaned 'running' runs as
- *     'failed' with a clear "interrupted" message — the UI surfaces this and
- *     offers a one-click retry.
- */
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
 import { triggerPipeline, getPipelineStatus, getLatestPipelineRun } from '@/lib/api';
 import { revalidateLeads } from '@/app/actions';
 import type { PipelineStatusResponse } from '@/lib/types';
+import { PipelineMissionModal } from '@/components/PipelineMissionModal';
 
 const DISTANCE_OPTIONS = [25, 50, 100] as const;
 type DistanceOption = (typeof DISTANCE_OPTIONS)[number];
@@ -28,7 +15,6 @@ const DEFAULT_DISTANCE: DistanceOption = 25;
 const DEFAULT_COUNTRY_CODE = 'us' as const;
 const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
 const LS_KEY = 'cosailor_pipeline_run_id';
-
 const INTERRUPTED_PREFIX = 'Server restarted';
 
 function isInterrupted(status: PipelineStatusResponse): boolean {
@@ -49,40 +35,38 @@ export function PipelineControls(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [postalCode, setPostalCode] = useState<string>(DEFAULT_POSTAL_CODE);
   const [distance, setDistance] = useState<DistanceOption>(DEFAULT_DISTANCE);
+  const [showModal, setShowModal] = useState(false);
 
   const isRunning = pipeStatus?.status === 'running';
   const isValidPostalCode = US_ZIP_REGEX.test(postalCode.trim());
   const isSubmitDisabled = loading || isRunning || postalCode.trim() === '' || !isValidPostalCode;
 
-  // On mount: restore last run from the backend so state survives page refreshes.
+  // Auto-open mission modal when pipeline starts running
+  useEffect(() => {
+    if (isRunning) setShowModal(true);
+  }, [isRunning]);
+
   useEffect(() => {
     let cancelled = false;
-
     async function restore() {
       try {
         const latest = await getLatestPipelineRun();
         if (cancelled || !isMounted.current) return;
-
-        // Pre-fill form with the params from the last run
         if (DISTANCE_OPTIONS.includes(latest.distance as DistanceOption)) {
           setDistance(latest.distance as DistanceOption);
         }
         if (latest.postal_code) setPostalCode(latest.postal_code);
-
         if (latest.status === 'running') {
-          // Re-attach to an in-progress run — polling useEffect will start automatically
           setRunId(latest.run_id);
           setPipeStatus(latest);
           localStorage.setItem(LS_KEY, latest.run_id);
         } else if (latest.status === 'failed' || latest.status === 'completed') {
-          // Show the last terminal status so the user can see what happened
           setPipeStatus(latest);
         }
       } catch {
         // No runs yet or backend down — start fresh
       }
     }
-
     restore();
     return () => { cancelled = true; };
   }, []);
@@ -114,10 +98,8 @@ export function PipelineControls(): React.JSX.Element {
     }
   };
 
-  // Poll every 3 s while a run is active.
   useEffect(() => {
     if (!runId || !isRunning) return;
-
     const interval = setInterval(async () => {
       try {
         const status = await getPipelineStatus(runId);
@@ -137,99 +119,212 @@ export function PipelineControls(): React.JSX.Element {
         // Transient network error — keep polling
       }
     }, 3000);
-
     return () => clearInterval(interval);
   }, [runId, isRunning, router]);
 
   const interrupted = pipeStatus ? isInterrupted(pipeStatus) : false;
 
+  const enrichedPct =
+    pipeStatus && pipeStatus.leads_scraped > 0
+      ? Math.min(100, (pipeStatus.leads_enriched / pipeStatus.leads_scraped) * 100)
+      : 0;
+
+  const inputStyle: React.CSSProperties = {
+    background: '#0F1117',
+    border: '1px solid #1C2333',
+    color: '#E8ECF4',
+    borderRadius: '0.5rem',
+    padding: '6px 12px',
+    fontSize: '13px',
+    outline: 'none',
+    transition: 'border-color 0.15s ease',
+    opacity: isRunning || loading ? 0.5 : 1,
+    cursor: isRunning || loading ? 'not-allowed' : 'text',
+  };
+
+  const selectStyle: React.CSSProperties = {
+    ...inputStyle,
+    cursor: isRunning || loading ? 'not-allowed' : 'pointer',
+    appearance: 'none' as const,
+    paddingRight: '28px',
+  };
+
   return (
-    <div className="flex items-center gap-4 flex-wrap">
-      <div className="flex flex-col gap-1">
-        <label htmlFor="pipeline-postal-code" className="text-xs font-medium text-gray-600">
-          ZIP Code
-        </label>
-        <input
-          id="pipeline-postal-code"
-          type="text"
-          value={postalCode}
-          onChange={(e) => setPostalCode(e.target.value)}
-          disabled={isRunning || loading}
-          placeholder="e.g. 10013"
-          className="h-9 w-28 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-        />
-        {postalCode.length > 0 && !isValidPostalCode && (
-          <p className="text-xs text-red-500 mt-1">Enter a valid US ZIP code</p>
-        )}
-      </div>
+    <div className="flex flex-col gap-3">
+      {/* Controls row */}
+      <div className="flex items-end gap-3 flex-wrap">
+        {/* ZIP Code */}
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="pipeline-postal-code"
+            className="text-xs font-medium uppercase tracking-widest"
+            style={{ color: '#3D4558' }}
+          >
+            ZIP Code
+          </label>
+          <input
+            id="pipeline-postal-code"
+            type="text"
+            value={postalCode}
+            onChange={(e) => setPostalCode(e.target.value)}
+            disabled={isRunning || loading}
+            placeholder="10013"
+            style={{ ...inputStyle, width: '100px' }}
+            onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = '#00C8FF'; }}
+            onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = '#1C2333'; }}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="pipeline-distance" className="text-xs font-medium text-gray-600">
-          Distance
-        </label>
-        <select
-          id="pipeline-distance"
-          value={distance}
-          onChange={(e) => setDistance(Number(e.target.value) as DistanceOption)}
-          disabled={isRunning || loading}
-          className="h-9 w-28 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {DISTANCE_OPTIONS.map((miles) => (
-            <option key={miles} value={miles}>
-              {miles} miles
-            </option>
-          ))}
-        </select>
-      </div>
+        {/* Distance */}
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="pipeline-distance"
+            className="text-xs font-medium uppercase tracking-widest"
+            style={{ color: '#3D4558' }}
+          >
+            Distance
+          </label>
+          <div className="relative">
+            <select
+              id="pipeline-distance"
+              value={distance}
+              onChange={(e) => setDistance(Number(e.target.value) as DistanceOption)}
+              disabled={isRunning || loading}
+              style={{ ...selectStyle, width: '110px' }}
+            >
+              {DISTANCE_OPTIONS.map((miles) => (
+                <option key={miles} value={miles}>{miles} miles</option>
+              ))}
+            </select>
+            <span
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+              style={{ color: '#3D4558' }}
+            >
+              ▾
+            </span>
+          </div>
+        </div>
 
-      <div className="flex flex-col justify-end gap-1">
-        <span className="text-xs font-medium text-transparent select-none" aria-hidden="true">
-          &nbsp;
-        </span>
-        <Button
+        {/* Run button */}
+        <button
+          type="button"
           onClick={handleRun}
           disabled={isSubmitDisabled}
-          className="bg-blue-600 hover:bg-blue-700"
+          className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
+          style={{
+            background: isSubmitDisabled ? '#0F1117' : '#00C8FF',
+            color: isSubmitDisabled ? '#3D4558' : '#08090C',
+            border: `1px solid ${isSubmitDisabled ? '#1C2333' : '#00C8FF'}`,
+            cursor: isSubmitDisabled ? 'not-allowed' : 'pointer',
+            boxShadow: isSubmitDisabled ? 'none' : '0 0 16px rgba(0,200,255,0.2)',
+          }}
         >
           {isRunning ? (
             <>
-              <span className="animate-spin mr-2 inline-block">&#x27F3;</span>
-              Running Pipeline...
+              <span className="pipeline-pulse inline-block">◈</span>
+              Running…
             </>
           ) : interrupted ? (
-            '↺ Retry Pipeline'
+            <><span>↺</span> Retry</>
           ) : (
-            '⚡ Run Pipeline'
+            <><span>⚡</span> Run Pipeline</>
           )}
-        </Button>
+        </button>
+
+        {/* Status chips */}
+        {pipeStatus && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {pipeStatus.status === 'running' && (
+              <>
+                <span
+                  className="text-xs font-mono px-2.5 py-1 rounded-full"
+                  style={{ background: 'rgba(0,200,255,0.08)', color: '#00C8FF', border: '1px solid rgba(0,200,255,0.2)' }}
+                >
+                  ↑ {pipeStatus.leads_scraped} scraped
+                </span>
+                <span
+                  className="text-xs font-mono px-2.5 py-1 rounded-full"
+                  style={{ background: 'rgba(0,232,122,0.08)', color: '#00E87A', border: '1px solid rgba(0,232,122,0.2)' }}
+                >
+                  ✓ {pipeStatus.leads_enriched} enriched
+                </span>
+                {!showModal && (
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(true)}
+                    className="text-xs font-mono px-2.5 py-1 rounded-full transition-all duration-150"
+                    style={{
+                      background: 'rgba(0,200,255,0.06)',
+                      color: '#00C8FF',
+                      border: '1px solid rgba(0,200,255,0.2)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ◈ View Mission
+                  </button>
+                )}
+              </>
+            )}
+            {pipeStatus.status === 'completed' && (
+              <span
+                className="text-xs font-mono px-2.5 py-1 rounded-full"
+                style={{ background: 'rgba(0,232,122,0.08)', color: '#00E87A', border: '1px solid rgba(0,232,122,0.2)' }}
+              >
+                ✓ {pipeStatus.leads_enriched} leads enriched
+              </span>
+            )}
+            {pipeStatus.status === 'failed' && (
+              <span
+                className="text-xs font-mono px-2.5 py-1 rounded-full"
+                style={{
+                  background: interrupted ? 'rgba(255,176,32,0.08)' : 'rgba(255,71,87,0.08)',
+                  color: interrupted ? '#FFB020' : '#FF4757',
+                  border: `1px solid ${interrupted ? 'rgba(255,176,32,0.2)' : 'rgba(255,71,87,0.2)'}`,
+                }}
+                title={pipeStatus.error_message ?? undefined}
+              >
+                {interrupted ? '⚠ Interrupted — retry' : '✗ Failed'}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {pipeStatus && (
-        <div className="text-sm max-w-xs">
-          {pipeStatus.status === 'running' && (
-            <span className="text-gray-600">
-              Scraped {pipeStatus.leads_scraped} &middot; Enriched {pipeStatus.leads_enriched}
-            </span>
-          )}
-          {pipeStatus.status === 'completed' && (
-            <span className="text-green-600 font-medium">
-              &#x2713; {pipeStatus.leads_enriched} leads enriched
-            </span>
-          )}
-          {pipeStatus.status === 'failed' && (
-            <span
-              className={interrupted ? 'text-amber-600' : 'text-red-600'}
-              title={pipeStatus.error_message ?? undefined}
-            >
-              {interrupted
-                ? '⚠ Pipeline interrupted by server restart — click Retry Pipeline to resume'
-                : `✗ Pipeline failed${pipeStatus.error_message ? `: ${pipeStatus.error_message.slice(0, 120)}` : ''}`}
-            </span>
-          )}
+      {/* ZIP validation error */}
+      {postalCode.length > 0 && !isValidPostalCode && (
+        <p className="text-xs" style={{ color: '#FF4757' }}>
+          Enter a valid US ZIP code
+        </p>
+      )}
+
+      {/* Generic error */}
+      {error && <p className="text-xs" style={{ color: '#FF4757' }}>{error}</p>}
+
+      {/* Progress bar — shown while running */}
+      {isRunning && (
+        <div
+          className="h-0.5 rounded-full overflow-hidden"
+          style={{ background: '#1C2333' }}
+        >
+          <div
+            className="h-full rounded-full bar-fill transition-all duration-700 ease-out"
+            style={{
+              width: `${enrichedPct || 8}%`,
+              background: 'linear-gradient(90deg, #00C8FF, #00E87A)',
+            }}
+          />
         </div>
       )}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {/* Mission Terminal modal */}
+      {showModal && (
+        <PipelineMissionModal
+          pipeStatus={pipeStatus}
+          postalCode={postalCode}
+          distance={distance}
+          onClose={() => setShowModal(false)}
+        />
+      )}
     </div>
   );
 }

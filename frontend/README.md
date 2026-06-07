@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cosailor Insights — Frontend
 
-## Getting Started
+Next.js 15 App Router dashboard for the Cosailor B2B sales intelligence platform.
 
-First, run the development server:
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.local.example .env.local   # set NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev                         # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment Variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+For production, set `NEXT_PUBLIC_API_URL` to your deployed backend URL.
 
-## Learn More
+## Key Commands
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run dev       # dev server with Turbopack
+npm run build     # production build
+npx tsc --noEmit  # type check only
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Next.js 15** App Router (Server + Client Components)
+- **Tailwind CSS** with custom dark design system
+- **TypeScript** throughout
+- **Fonts**: Syne (headings), DM Sans (body), JetBrains Mono (data)
 
-## Deploy on Vercel
+## Component Overview
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Component | Type | Purpose |
+|---|---|---|
+| `app/page.tsx` | Server | Dashboard layout, leads SSR |
+| `app/leads/[id]/page.tsx` | Server | Lead detail two-column layout |
+| `PipelineControls.tsx` | Client | Run button, status polling, modal trigger |
+| `PipelineMissionModal.tsx` | Client (Portal) | Full-screen live pipeline progress overlay |
+| `LeadCard.tsx` | Server | Score ring + hover card |
+| `LeadsGridClient.tsx` | Client | Filter bar, grid, pagination |
+| `ScoreRing.tsx` | Server | Animated SVG score arc |
+| `ScoreBadge.tsx` | Server | Score tier badge |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Architecture Notes
+
+- Server Components by default — `'use client'` only for interactivity
+- `PipelineControls` is the **only** polling component (every 3s while running)
+- `PipelineMissionModal` uses `ReactDOM.createPortal` to render at `document.body` level, bypassing the sticky header's CSS stacking context
+- All API calls go through `lib/api.ts`; data fetching in Server Components uses `lib/leads.ts`

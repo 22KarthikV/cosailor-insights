@@ -1,15 +1,6 @@
-/**
- * Dashboard page — the application's home route ("/").
- *
- * Reads page and limit from URL searchParams so pagination is URL-driven
- * (shareable, back-button safe). Falls back to page=1, limit=12 when absent.
- * Uses getCachedLeads() so post-run loads are served from the Next.js cache.
- * During a pipeline run the cache is busted every 3 s by PipelineControls.
- */
 import { Suspense } from 'react';
 import { LeadsGridClient } from '@/components/LeadsGridClient';
 import { PipelineControls } from '@/components/PipelineControls';
-import { Skeleton } from '@/components/ui/skeleton';
 import { getCachedLeads } from '@/lib/leads';
 import type { Lead } from '@/lib/types';
 
@@ -39,13 +30,22 @@ async function LeadsSection({ page, limit, scoreTier, sortBy }: LeadsSectionProp
     console.error('[LeadsSection] Failed to fetch leads:', err);
     fetchError = true;
   }
+
   if (fetchError) {
     return (
-      <p className="text-sm text-red-500 mt-4">
+      <div
+        className="mt-4 px-4 py-3 rounded-lg text-sm"
+        style={{
+          background: 'rgba(255,71,87,0.08)',
+          border: '1px solid rgba(255,71,87,0.2)',
+          color: '#FF4757',
+        }}
+      >
         Unable to load leads. Make sure the backend is running on port 8000.
-      </p>
+      </div>
     );
   }
+
   return (
     <LeadsGridClient
       leads={leads}
@@ -55,6 +55,31 @@ async function LeadsSection({ page, limit, scoreTier, sortBy }: LeadsSectionProp
       scoreTier={scoreTier}
       sortBy={sortBy}
     />
+  );
+}
+
+function GridSkeleton() {
+  return (
+    <div className="space-y-5">
+      {/* Stats bar skeleton */}
+      <div className="flex flex-wrap gap-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="shimmer-block h-16 w-28 rounded-lg" />
+        ))}
+      </div>
+      {/* Filter row skeleton */}
+      <div className="flex gap-2">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="shimmer-block h-7 w-20 rounded-full" />
+        ))}
+      </div>
+      {/* Grid skeleton */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="shimmer-block h-44 rounded-xl" />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -77,46 +102,47 @@ export default async function DashboardPage({
     : 'score_desc') as SortOption;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <div className="flex items-center justify-between flex-wrap gap-4">
+    <div className="min-h-screen" style={{ background: '#08090C' }}>
+      {/* Top command bar */}
+      <header
+        className="sticky top-0 z-20 px-6 py-4"
+        style={{
+          background: 'rgba(8,9,12,0.85)',
+          borderBottom: '1px solid #1C2333',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+        }}
+      >
+        <div className="max-w-7xl mx-auto flex items-start justify-between gap-6 flex-wrap">
+          {/* Brand */}
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Cosailor Insights</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              GAF Roofing Contractors &middot; Commercial &middot; United States
+            <h1
+              className="text-xl font-heading font-bold tracking-tight"
+              style={{ color: '#E8ECF4' }}
+            >
+              Cosailor Insights
+            </h1>
+            <p className="text-xs mt-0.5" style={{ color: '#3D4558' }}>
+              GAF Roofing&nbsp;·&nbsp;Commercial&nbsp;·&nbsp;United States
             </p>
           </div>
+
+          {/* Pipeline controls */}
           <PipelineControls />
         </div>
+      </header>
 
-        <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-full bg-green-400 inline-block" />
-            High priority (8-10)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-full bg-yellow-400 inline-block" />
-            Medium (5-7)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-full bg-red-400 inline-block" />
-            Low (1-4)
-          </span>
-        </div>
-      </div>
-
-      {/* Skeleton grid shown while LeadsSection is streaming */}
-      <Suspense
-        fallback={
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} className="h-48 rounded-lg" />
-            ))}
-          </div>
-        }
-      >
-        <LeadsSection page={page} limit={limit} scoreTier={scoreTier} sortBy={sortBy} />
-      </Suspense>
+      {/* Main content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <Suspense fallback={<GridSkeleton />}>
+          <LeadsSection
+            page={page}
+            limit={limit}
+            scoreTier={scoreTier}
+            sortBy={sortBy}
+          />
+        </Suspense>
+      </main>
     </div>
   );
 }

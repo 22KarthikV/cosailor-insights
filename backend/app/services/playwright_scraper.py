@@ -187,6 +187,7 @@ class PlaywrightScraper:
         total_count = 0
         coveo_token: str = ""
         coveo_request_body: dict = {}
+        cookie_header: str = ""
 
         def on_request(req) -> None:
             nonlocal coveo_token, coveo_request_body
@@ -202,13 +203,19 @@ class PlaywrightScraper:
             if _COVEO_URL_FRAGMENT in resp.url and not first_batch:
                 try:
                     data = await resp.json()
-                    first_batch.extend(data.get("results", []))
+                    results = data.get("results", [])
                     total_count = data.get("totalCount", 0)
+                    first_batch.extend(results)
+                    logger.info(
+                        "Coveo first batch: %d results captured, totalCount=%d",
+                        len(results), total_count,
+                    )
                 except Exception:
-                    pass
+                    logger.exception("Failed to parse first Coveo response")
 
         browser = None
         page = None
+        context = None
         try:
             async with async_playwright() as pw:
                 try:
@@ -238,6 +245,15 @@ class PlaywrightScraper:
                     page.on("response", on_response)
                     await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
                     await page.wait_for_timeout(_INITIAL_WAIT_MS)
+
+                    # Capture Akamai session cookies so httpx pagination can
+                    # present the same session identity to Coveo's API.
+                    if context is not None:
+                        cookies = await context.cookies()
+                        cookie_header = "; ".join(
+                            f"{c['name']}={c['value']}" for c in cookies
+                        )
+                        logger.debug("Captured %d browser cookies for pagination", len(cookies))
                 except Exception:
                     logger.exception("Playwright phase failed for %s", url)
                 finally:
@@ -254,9 +270,17 @@ class PlaywrightScraper:
 
         all_results = list(first_batch)
 
+        logger.info(
+            "Pagination check: totalCount=%d, first_batch=%d, token=%s, body_keys=%s",
+            total_count, len(first_batch),
+            "yes" if coveo_token else "no",
+            list(coveo_request_body.keys()) if coveo_request_body else "none",
+        )
+
         if coveo_token and coveo_request_body and total_count > len(first_batch):
             all_results += await self._paginate_coveo(
-                coveo_token, coveo_request_body, total_count, start=len(first_batch)
+                coveo_token, coveo_request_body, total_count,
+                start=len(first_batch), cookie_header=cookie_header,
             )
 
         seen: set[str] = set()
@@ -280,19 +304,43 @@ class PlaywrightScraper:
         base_body: dict,
         total_count: int,
         start: int,
+        cookie_header: str = "",
     ) -> list[dict]:
-        """Fetch all Coveo pages beyond the first browser-captured batch."""
+        """Fetch all Coveo pages beyond the first browser-captured batch.
+
+        Passes browser cookies and full browser-like headers so Akamai Bot Manager
+        does not reject the direct httpx requests — the same session identity as the
+        Playwright phase is presented to the Coveo API.
+        """
         extra: list[dict] = []
         coveo_url = (
             "https://gafmaterialscorporationproduction3yalqk12.org.coveo.com"
             "/rest/search/v2?organizationId=gafmaterialscorporationproduction3yalqk12"
         )
-        headers = {
+        headers: dict[str, str] = {
             "Authorization": token,
             "Content-Type": "application/json",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Origin": "https://www.gaf.com",
+            "Referer": "https://www.gaf.com/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
         }
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+
         first_result = start
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             while first_result < total_count:
                 body = {
                     **base_body,
@@ -309,14 +357,25 @@ class PlaywrightScraper:
                     data = resp.json()
                     batch = data.get("results", [])
                     if not batch:
+                        logger.warning(
+                            "Coveo returned empty batch at firstResult=%d (totalCount=%d); stopping",
+                            first_result, total_count,
+                        )
                         break
                     extra.extend(batch)
                     first_result += len(batch)
-                    logger.debug(
-                        "Coveo page firstResult=%d → +%d results",
-                        first_result - len(batch), len(batch),
+                    logger.info(
+                        "Coveo page firstResult=%d → +%d results (running total=%d / %d)",
+                        first_result - len(batch), len(batch), len(extra) + start, total_count,
                     )
                 except Exception:
-                    logger.exception("httpx Coveo pagination failed at firstResult=%d", first_result)
+                    logger.exception(
+                        "httpx Coveo pagination failed at firstResult=%d (totalCount=%d, collected=%d)",
+                        first_result, total_count, len(extra),
+                    )
                     break
+        logger.info(
+            "Pagination complete: %d additional results fetched (first_batch=%d, total=%d)",
+            len(extra), start, len(extra) + start,
+        )
         return extra
