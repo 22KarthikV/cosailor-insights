@@ -50,9 +50,9 @@ GAF_PROFILE_URL_TEMPLATE = (
 
 _COVEO_URL_FRAGMENT = "coveo.com/rest/search"
 
-# Milliseconds to wait after domcontentloaded for React to bootstrap and
-# fire the initial Coveo XHR (empirically ~5–8 s needed).
-_INITIAL_WAIT_MS = 15_000
+# How long to wait for the first Coveo XHR after page load (ms).
+# React + Akamai challenge can take 10–20 s on free-tier cloud servers.
+_COVEO_TIMEOUT_MS = 45_000
 
 # Results per httpx pagination page (Coveo accepts up to 100).
 _PAGE_SIZE = 100
@@ -198,23 +198,7 @@ class PlaywrightScraper:
                 except Exception:
                     pass
 
-        async def on_response(resp) -> None:
-            nonlocal total_count
-            if _COVEO_URL_FRAGMENT in resp.url and not first_batch:
-                try:
-                    data = await resp.json()
-                    results = data.get("results", [])
-                    total_count = data.get("totalCount", 0)
-                    first_batch.extend(results)
-                    logger.info(
-                        "Coveo first batch: %d results captured, totalCount=%d",
-                        len(results), total_count,
-                    )
-                except Exception:
-                    logger.exception("Failed to parse first Coveo response")
-
         browser = None
-        page = None
         context = None
         try:
             async with async_playwright() as pw:
@@ -253,25 +237,39 @@ class PlaywrightScraper:
                     await context.add_init_script(_STEALTH_JS)
                     page = await context.new_page()
                     page.on("request", on_request)
-                    page.on("response", on_response)
-                    await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-                    page_title = await page.title()
-                    logger.info("Page loaded — title: %r  url: %s", page_title, page.url)
-                    await page.wait_for_timeout(_INITIAL_WAIT_MS)
 
-                    # Capture Akamai session cookies so httpx pagination can
-                    # present the same session identity to Coveo's API.
-                    if context is not None:
-                        cookies = await context.cookies()
-                        cookie_header = "; ".join(
-                            f"{c['name']}={c['value']}" for c in cookies
+                    # Use expect_response to hold a reference to the Coveo response
+                    # until we explicitly read its body. The previous on_response
+                    # async callback pattern races against the browser releasing the
+                    # resource buffer, causing "No data found for resource" errors.
+                    try:
+                        async with page.expect_response(
+                            lambda r: _COVEO_URL_FRAGMENT in r.url,
+                            timeout=_COVEO_TIMEOUT_MS,
+                        ) as resp_info:
+                            await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                            page_title = await page.title()
+                            logger.info("Page loaded — title: %r  url: %s", page_title, page.url)
+
+                        coveo_resp = await resp_info.value
+                        await coveo_resp.finished()
+                        data = await coveo_resp.json()
+                        first_batch = data.get("results", [])
+                        total_count = data.get("totalCount", 0)
+                        logger.info(
+                            "Coveo first batch: %d results captured, totalCount=%d",
+                            len(first_batch), total_count,
                         )
-                        logger.debug("Captured %d browser cookies for pagination", len(cookies))
+                    except Exception:
+                        logger.exception("Failed to capture Coveo response for %s", url)
+
+                    # Capture Akamai session cookies for httpx pagination.
+                    cookies = await context.cookies()
+                    cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+                    logger.debug("Captured %d browser cookies for pagination", len(cookies))
                 except Exception:
                     logger.exception("Playwright phase failed for %s", url)
                 finally:
-                    if page is not None:
-                        await page.close()
                     if browser is not None:
                         await browser.close()
         except Exception:
