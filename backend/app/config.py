@@ -12,12 +12,12 @@ from typing import Literal
 class Settings(BaseSettings):
     """Environment-sourced API keys and Supabase credentials.
 
-    All fields are required; a missing value raises ValidationError at startup
-    rather than surfacing as a runtime AttributeError deep inside a request handler.
+    Required fields raise ValidationError at startup. firecrawl_api_key is optional
+    because the default scraper is playwright; set it only if using the firecrawl path.
     """
     supabase_url: str
     supabase_key: str
-    firecrawl_api_key: str
+    firecrawl_api_key: str | None = None
     perplexity_api_key: str
     anthropic_api_key: str
 
