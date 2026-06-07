@@ -1,11 +1,9 @@
 services:
   - type: web
     name: cosailor-backend
-    runtime: python
+    env: docker
     region: oregon
     plan: free
-    buildCommand: pip install -r requirements.txt && playwright install chromium && sudo apt-get install -y --no-install-recommends libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libglib2.0-0 libx11-6 libxext6 libxrender1 libxss1 libxtst6 libxcursor1
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SUPABASE_URL
         sync: false
@@ -15,5 +13,3 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: PYTHON_VERSION
-        value: 3.11.0
