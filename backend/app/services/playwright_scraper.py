@@ -52,7 +52,7 @@ _COVEO_URL_FRAGMENT = "coveo.com/rest/search"
 
 # Milliseconds to wait after domcontentloaded for React to bootstrap and
 # fire the initial Coveo XHR (empirically ~5–8 s needed).
-_INITIAL_WAIT_MS = 10_000
+_INITIAL_WAIT_MS = 15_000
 
 # Results per httpx pagination page (Coveo accepts up to 100).
 _PAGE_SIZE = 100
@@ -226,6 +226,11 @@ class PlaywrightScraper:
                             "--no-sandbox",
                             "--disable-dev-shm-usage",
                             "--disable-gpu",
+                            "--no-zygote",
+                            "--disable-setuid-sandbox",
+                            "--single-process",
+                            "--disable-extensions",
+                            "--disable-software-rasterizer",
                             "--window-size=1280,800",
                         ],
                     )
@@ -250,6 +255,8 @@ class PlaywrightScraper:
                     page.on("request", on_request)
                     page.on("response", on_response)
                     await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                    page_title = await page.title()
+                    logger.info("Page loaded — title: %r  url: %s", page_title, page.url)
                     await page.wait_for_timeout(_INITIAL_WAIT_MS)
 
                     # Capture Akamai session cookies so httpx pagination can
