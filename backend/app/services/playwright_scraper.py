@@ -220,8 +220,14 @@ class PlaywrightScraper:
             async with async_playwright() as pw:
                 try:
                     browser = await pw.chromium.launch(
-                        headless=False,
-                        args=["--disable-blink-features=AutomationControlled", "--start-maximized"],
+                        headless=True,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-gpu",
+                            "--window-size=1280,800",
+                        ],
                     )
                     context = await browser.new_context(
                         user_agent=(

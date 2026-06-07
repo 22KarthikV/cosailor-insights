@@ -22,11 +22,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cosailor Insights API", version="1.0.0", lifespan=lifespan)
 
-# Allow the Next.js dev server to call the API during local development.
-# In production this should be restricted to the deployed frontend origin.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://localhost:3003",
+        "https://cosailor-insights.vercel.app",
+        "https://*.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
