@@ -11,7 +11,6 @@ knows which fields to populate and in what format.
 """
 from pydantic import BaseModel, Field
 from typing import Optional
-from firecrawl import FirecrawlApp, JsonConfig
 
 from app.config import ScraperConfig
 from app.models.lead import ContractorRecord
@@ -62,6 +61,7 @@ class GafScraper:
     """Scrapes GAF contractor listings using Firecrawl's JSON extraction mode."""
 
     def __init__(self, api_key: str):
+        from firecrawl import FirecrawlApp  # lazy — only when firecrawl scraper is selected
         self._app = FirecrawlApp(api_key=api_key)
 
     def scrape_contractors(self, config: ScraperConfig) -> list[ContractorRecord]:
@@ -77,6 +77,7 @@ class GafScraper:
             distance=config.distance,
         )
 
+        from firecrawl import JsonConfig  # lazy — only when firecrawl scraper is selected
         result = self._app.scrape_url(
             url,
             formats=["json"],
